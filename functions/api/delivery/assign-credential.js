@@ -1,6 +1,7 @@
 // Cloudflare Pages Function — POST /api/delivery/assign-credential
 // Finds the credential already assigned by purchase_with_wallet (or assigns a new one),
-// stores its content directly in order_items.delivered_payload, then deletes the credential row.
+// stores its content directly in order_items.delivered_payload, and preserves the
+// credential record (it will be marked with order_id/delivered_at by the RPC).
 
 export async function onRequestPost({ request, env }) {
   const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
@@ -75,11 +76,8 @@ export async function onRequestPost({ request, env }) {
     body: JSON.stringify({ delivered_payload: credContent }),
   });
 
-  // Step 5: Delete the credential
-  if (credId) {
-    await sbFetch(supabaseUrl, serviceKey,
-      `/rest/v1/product_credentials?id=eq.${credId}`, { method: "DELETE" });
-  }
+  // Step 5: Preserve credential record (it was updated by assign_credential_to_order).
+  // We intentionally do NOT delete the product_credentials row to keep an audit trail.
 
   return json({ assigned: true, content: credContent, label: credLabel });
 }

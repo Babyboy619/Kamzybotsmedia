@@ -1,5 +1,6 @@
 // Cloudflare Pages Function — POST /api/delivery/admin-redispense
-// Admin-only: finds or assigns a credential, stores content in delivered_payload, deletes credential row.
+// Admin-only: finds or assigns a credential, stores content in order_items.delivered_payload,
+// and preserves the credential record (the RPC marks it with order_id/delivered_at).
 
 export async function onRequestPost({ request, env }) {
   const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
@@ -66,10 +67,7 @@ export async function onRequestPost({ request, env }) {
     body: JSON.stringify({ delivered_payload: credContent }),
   });
 
-  if (credId) {
-    await sbFetch(supabaseUrl, serviceKey,
-      `/rest/v1/product_credentials?id=eq.${credId}`, { method: "DELETE" });
-  }
+  // Preserve credential record (do NOT delete) — the credential is kept for auditing.
 
   return json({ assigned: true, content: credContent });
 }

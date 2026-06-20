@@ -107,7 +107,8 @@ function AdminDashboard({ adminUser }: { adminUser: import("@supabase/supabase-j
             <TabsTrigger value="sold"><CheckCircle className="w-3.5 h-3.5 mr-1" />Sold</TabsTrigger>
             <TabsTrigger value="orders"><ShoppingCart className="w-3.5 h-3.5 mr-1" />Orders</TabsTrigger>
             <TabsTrigger value="payments"><CreditCard className="w-3.5 h-3.5 mr-1" />Payments</TabsTrigger>
-            <TabsTrigger value="audit"><ClipboardList className="w-3.5 h-3.5 mr-1" />Audit</TabsTrigger>
+              <TabsTrigger value="audit"><ClipboardList className="w-3.5 h-3.5 mr-1" />Audit</TabsTrigger>
+              <TabsTrigger value="messages"><Tag className="w-3.5 h-3.5 mr-1" />Messages</TabsTrigger>
             <TabsTrigger value="analytics"><BarChart3 className="w-3.5 h-3.5 mr-1" />Analytics</TabsTrigger>
             <TabsTrigger value="settings"><Settings className="w-3.5 h-3.5 mr-1" />Settings</TabsTrigger>
           </TabsList>
@@ -119,6 +120,7 @@ function AdminDashboard({ adminUser }: { adminUser: import("@supabase/supabase-j
           <TabsContent value="orders"><OrdersTab /></TabsContent>
           <TabsContent value="payments"><PaymentsTab /></TabsContent>
           <TabsContent value="audit"><AuditTab /></TabsContent>
+          <TabsContent value="messages"><MessagesTab /></TabsContent>
           <TabsContent value="analytics"><AnalyticsTab stats={stats} /></TabsContent>
           <TabsContent value="settings"><SettingsTab /></TabsContent>
         </Tabs>
@@ -1084,6 +1086,105 @@ function AnalyticsTab({ stats }: { stats: Stats }) {
           </Card>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ─── Messages Tab ─────────────────────────────────────────────────────────────
+function MessagesTab() {
+  const [msgs, setMsgs] = useState<{ id: string; title: string; content: string; active: boolean; created_at: string; updated_at: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<{ id?: string; title: string; content: string; active: boolean } | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const fetch = async () => {
+    setLoading(true);
+    const { data } = await supabase.from("admin_messages").select("*").order("created_at", { ascending: false }).limit(200);
+    setMsgs((data ?? []) as any);
+    setLoading(false);
+  };
+  useEffect(() => { fetch(); }, []);
+
+  const startNew = () => setEditing({ title: "", content: "", active: false });
+
+  const save = async () => {
+    if (!editing) return;
+    if (!editing.title.trim() || !editing.content.trim()) return toast.error("Title and content required");
+    setSaving(true);
+    if (editing.id) {
+      const { error } = await supabase.from("admin_messages").update({ title: editing.title.trim(), content: editing.content, active: editing.active, updated_at: new Date().toISOString() }).eq("id", editing.id);
+      setSaving(false);
+      if (error) { toast.error(error.message); return; }
+      toast.success("Message updated");
+    } else {
+      const { error } = await supabase.from("admin_messages").insert({ title: editing.title.trim(), content: editing.content, active: editing.active });
+      setSaving(false);
+      if (error) { toast.error(error.message); return; }
+      toast.success("Message created");
+    }
+    setEditing(null); fetch();
+  };
+
+  const remove = async (id: string) => {
+    const { error } = await supabase.from("admin_messages").delete().eq("id", id);
+    if (error) toast.error(error.message); else { toast.success("Deleted"); fetch(); }
+  };
+
+  const toggleActive = async (m: { id: string; active: boolean }) => {
+    const { error } = await supabase.from("admin_messages").update({ active: !m.active, updated_at: new Date().toISOString() }).eq("id", m.id);
+    if (error) toast.error(error.message); else { fetch(); }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold text-brand-navy">Admin Messages ({msgs.length})</h2>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={fetch}><RefreshCw className="w-4 h-4" /></Button>
+          <Button size="sm" className="bg-brand-orange hover:bg-brand-orange-hover text-white" onClick={startNew}>New Message</Button>
+        </div>
+      </div>
+
+      {editing ? (
+        <Card className="mb-4">
+          <CardContent>
+            <div className="grid grid-cols-1 gap-2">
+              <Input placeholder="Title" value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} />
+              <textarea className="w-full rounded-md border border-input px-3 py-2" rows={6} value={editing.content} onChange={(e) => setEditing({ ...editing, content: e.target.value })} />
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-xs">Publish</Label>
+                  <div className="text-xs text-muted-foreground">Toggle to make this message visible to users</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+                  <Button onClick={save} disabled={saving} className="bg-brand-orange hover:bg-brand-orange-hover text-white">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}</Button>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {loading ? <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-brand-orange" /></div> : (
+        <div className="space-y-2">
+          {msgs.length === 0 ? <p className="text-sm text-muted-foreground">No messages configured.</p> : msgs.map((m) => (
+            <Card key={m.id}>
+              <CardContent className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <div className="font-medium text-brand-navy">{m.title} {m.active && <Badge className="text-xs bg-green-100 text-green-700 ml-2">Published</Badge>}</div>
+                  <div className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap">{m.content}</div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Button size="sm" variant="ghost" onClick={() => setEditing({ id: m.id, title: m.title, content: m.content, active: m.active })}>Edit</Button>
+                  <Button size="sm" variant="ghost" onClick={() => toggleActive(m)}>{m.active ? "Unpublish" : "Publish"}</Button>
+                  <Button size="sm" variant="ghost" className="text-red-500" onClick={() => remove(m.id)}>Delete</Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
