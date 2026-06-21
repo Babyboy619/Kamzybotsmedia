@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Auto-push to GitHub — uses GITHUB_PAT from Replit Secrets
+# Auto-push to GitHub — Replit is source of truth, force-pushes to main
 set -e
 
 if [ -z "$GITHUB_PAT" ]; then
@@ -9,18 +9,18 @@ fi
 
 REPO="https://$GITHUB_PAT@github.com/evilos619-cell/kamzybots-media.git"
 
-# Clear any stale git lock files (safe — only removes .lock files)
+# Clear any stale git lock files and abort any in-progress merge
 find .git -name "*.lock" -delete 2>/dev/null || true
+rm -f .git/MERGE_HEAD .git/MERGE_MSG .git/MERGE_MODE 2>/dev/null || true
 
 # Configure identity for this session
 git config user.email "kamzybotsmedia@replit.dev"
 git config user.name "KAMZYBOT'S MEDIA Bot"
-git config pull.rebase false
 
-# Set authenticated remote (PAT embedded in URL)
+# Set authenticated remote
 git remote set-url origin "$REPO"
 
-# Stop tracking attached_assets/ (already in .gitignore — remove from index if still tracked)
+# Stop tracking attached_assets/ (already in .gitignore)
 git rm -r --cached attached_assets/ 2>/dev/null || true
 
 # Stage everything
@@ -28,15 +28,12 @@ git add -A
 
 # Commit only if there are staged changes
 if git diff --cached --quiet; then
-  echo "✅ Nothing new to commit — already up to date."
+  echo "✅ Nothing new to commit."
 else
-  git commit -m "chore: auto-sync from Replit [$(date '+%Y-%m-%d %H:%M')]"
+  git commit -m "chore: sync from Replit [$(date '+%Y-%m-%d %H:%M')]"
   echo "📦 Changes committed."
 fi
 
-# Pull remote changes first to avoid rejected pushes
-git pull origin main --allow-unrelated-histories --no-edit 2>/dev/null || true
-
-# Push to main
-git push origin HEAD:main
+# Force-push: Replit is always the source of truth
+git push origin HEAD:main --force
 echo "🚀 Successfully pushed to github.com/evilos619-cell/kamzybots-media (main)"

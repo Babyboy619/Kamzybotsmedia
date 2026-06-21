@@ -16,18 +16,24 @@ dist-ssr
 .nitro
 *.local
 
+<<<<<<< HEAD
 # Environment variables — never commit real secrets
 .env
 .env.local
 .env.*.local
 
+=======
+>>>>>>> 9a097937a83c99b045df78274b2e655078e2daaf
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
 
+<<<<<<< HEAD
 # Replit-attached screenshots and uploads — not part of source
 attached_assets/
 
+=======
+>>>>>>> 9a097937a83c99b045df78274b2e655078e2daaf
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

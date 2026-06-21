@@ -1,2 +1,10 @@
 User-agent: *
 Allow: /
+<<<<<<< HEAD
+=======
+Disallow: /admin
+Disallow: /manage
+Disallow: /dashboard
+
+Sitemap: https://kamzybotsmedia.store/sitemap.xml
+>>>>>>> 9a097937a83c99b045df78274b2e655078e2daaf
