@@ -529,7 +529,8 @@ app.post("/api/admin/users/:id/debit", async (req, res) => {
     if (current < amount) { await client.query("ROLLBACK"); return err(res, 400, "insufficient balance"); }
     const newBal = current - amount;
     await client.query(`UPDATE wallets SET balance = $1, updated_at = now() WHERE id = $2`, [newBal, wallet.id]);
-    const txRes = await client.query(`INSERT INTO wallet_transactions (wallet_id,user_id,type,amount,balance_after,status,provider,reference,description,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now()) RETURNING id`, [wallet.id, target, 'debit', amount, newBal, 'success', 'manual', 'admin-debit-' || gen_random_uuid()::text, description]);
+    const txRef = `admin-debit-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const txRes = await client.query(`INSERT INTO wallet_transactions (wallet_id,user_id,type,amount,balance_after,status,provider,reference,description,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now()) RETURNING id`, [wallet.id, target, 'debit', amount, newBal, 'success', 'manual', txRef, description]);
     await client.query(`INSERT INTO activity_logs (actor_id, action, target, metadata, created_at) VALUES ($1,$2,$3,$4, now())`, [admin.id, 'admin_debit', target, JSON.stringify({ amount, description })]);
     await client.query("COMMIT");
     return res.json({ success: true, newBalance: newBal });
