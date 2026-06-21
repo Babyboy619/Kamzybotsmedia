@@ -14,7 +14,6 @@ export type Database = {
   }
   public: {
     Tables: {
-<<<<<<< HEAD
       activity_logs: {
         Row: {
           action: string
@@ -83,129 +82,6 @@ export type Database = {
           },
           {
             foreignKeyName: "order_items_product_id_fkey"
-=======
-      coupon_redemptions: {
-        Row: {
-          coupon_id: string
-          created_at: string
-          id: string
-          order_id: string | null
-          user_id: string
-        }
-        Insert: {
-          coupon_id: string
-          created_at?: string
-          id?: string
-          order_id?: string | null
-          user_id: string
-        }
-        Update: {
-          coupon_id?: string
-          created_at?: string
-          id?: string
-          order_id?: string | null
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "coupon_redemptions_coupon_id_fkey"
-            columns: ["coupon_id"]
-            isOneToOne: false
-            referencedRelation: "coupons"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      coupons: {
-        Row: {
-          active: boolean
-          code: string
-          created_at: string
-          created_by: string | null
-          discount_percent: number
-          discount_type: string
-          expires_at: string | null
-          fixed_amount: number | null
-          id: string
-          max_uses: number | null
-          scope: string
-          times_used: number
-        }
-        Insert: {
-          active?: boolean
-          code: string
-          created_at?: string
-          created_by?: string | null
-          discount_percent: number
-          discount_type?: string
-          expires_at?: string | null
-          fixed_amount?: number | null
-          id?: string
-          max_uses?: number | null
-          scope?: string
-          times_used?: number
-        }
-        Update: {
-          active?: boolean
-          code?: string
-          created_at?: string
-          created_by?: string | null
-          discount_percent?: number
-          discount_type?: string
-          expires_at?: string | null
-          fixed_amount?: number | null
-          id?: string
-          max_uses?: number | null
-          scope?: string
-          times_used?: number
-        }
-        Relationships: []
-      }
-      orders: {
-        Row: {
-          coupon_code: string | null
-          created_at: string
-          discount_percent: number | null
-          id: string
-          login_id: string | null
-          price_paid: number
-          product_id: string
-          status: string
-          user_id: string
-        }
-        Insert: {
-          coupon_code?: string | null
-          created_at?: string
-          discount_percent?: number | null
-          id?: string
-          login_id?: string | null
-          price_paid: number
-          product_id: string
-          status?: string
-          user_id: string
-        }
-        Update: {
-          coupon_code?: string | null
-          created_at?: string
-          discount_percent?: number | null
-          id?: string
-          login_id?: string | null
-          price_paid?: number
-          product_id?: string
-          status?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "orders_login_id_fkey"
-            columns: ["login_id"]
-            isOneToOne: false
-            referencedRelation: "product_logins"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "orders_product_id_fkey"
->>>>>>> 9a097937a83c99b045df78274b2e655078e2daaf
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
@@ -213,7 +89,6 @@ export type Database = {
           },
         ]
       }
-<<<<<<< HEAD
       orders: {
         Row: {
           created_at: string
@@ -356,81 +231,6 @@ export type Database = {
           },
           {
             foreignKeyName: "product_credentials_product_id_fkey"
-=======
-      payment_transactions: {
-        Row: {
-          amount_credited: number
-          amount_paid: number
-          coupon_code: string | null
-          created_at: string
-          id: string
-          provider: string
-          raw_payload: Json | null
-          reference: string
-          status: string
-          user_id: string
-          verified_at: string | null
-        }
-        Insert: {
-          amount_credited?: number
-          amount_paid: number
-          coupon_code?: string | null
-          created_at?: string
-          id?: string
-          provider: string
-          raw_payload?: Json | null
-          reference: string
-          status?: string
-          user_id: string
-          verified_at?: string | null
-        }
-        Update: {
-          amount_credited?: number
-          amount_paid?: number
-          coupon_code?: string | null
-          created_at?: string
-          id?: string
-          provider?: string
-          raw_payload?: Json | null
-          reference?: string
-          status?: string
-          user_id?: string
-          verified_at?: string | null
-        }
-        Relationships: []
-      }
-      product_logins: {
-        Row: {
-          created_at: string
-          id: string
-          login_data: string
-          product_id: string
-          sold_at: string | null
-          sold_to_user_id: string | null
-          status: string
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          login_data: string
-          product_id: string
-          sold_at?: string | null
-          sold_to_user_id?: string | null
-          status?: string
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          login_data?: string
-          product_id?: string
-          sold_at?: string | null
-          sold_to_user_id?: string | null
-          status?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "product_logins_product_id_fkey"
->>>>>>> 9a097937a83c99b045df78274b2e655078e2daaf
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "products"
@@ -440,7 +240,6 @@ export type Database = {
       }
       products: {
         Row: {
-<<<<<<< HEAD
           category_id: string | null
           created_at: string
           currency: string
@@ -521,43 +320,10 @@ export type Database = {
           email?: string | null
           id?: string
           phone?: string | null
-=======
-          active: boolean
-          category: string
-          created_at: string
-          description: string | null
-          id: string
-          image_url: string | null
-          name: string
-          price: number
-          updated_at: string
-        }
-        Insert: {
-          active?: boolean
-          category?: string
-          created_at?: string
-          description?: string | null
-          id?: string
-          image_url?: string | null
-          name: string
-          price: number
-          updated_at?: string
-        }
-        Update: {
-          active?: boolean
-          category?: string
-          created_at?: string
-          description?: string | null
-          id?: string
-          image_url?: string | null
-          name?: string
-          price?: number
->>>>>>> 9a097937a83c99b045df78274b2e655078e2daaf
           updated_at?: string
         }
         Relationships: []
       }
-<<<<<<< HEAD
       site_settings: {
         Row: {
           key: string
@@ -573,44 +339,6 @@ export type Database = {
           key?: string
           updated_at?: string
           value?: Json
-=======
-      profiles: {
-        Row: {
-          created_at: string
-          email: string | null
-          first_name: string | null
-          id: string
-          is_suspended: boolean
-          last_name: string | null
-          phone: string | null
-          updated_at: string
-          username: string | null
-          wallet_balance: number
-        }
-        Insert: {
-          created_at?: string
-          email?: string | null
-          first_name?: string | null
-          id: string
-          is_suspended?: boolean
-          last_name?: string | null
-          phone?: string | null
-          updated_at?: string
-          username?: string | null
-          wallet_balance?: number
-        }
-        Update: {
-          created_at?: string
-          email?: string | null
-          first_name?: string | null
-          id?: string
-          is_suspended?: boolean
-          last_name?: string | null
-          phone?: string | null
-          updated_at?: string
-          username?: string | null
-          wallet_balance?: number
->>>>>>> 9a097937a83c99b045df78274b2e655078e2daaf
         }
         Relationships: []
       }
@@ -637,7 +365,6 @@ export type Database = {
       }
       wallet_transactions: {
         Row: {
-<<<<<<< HEAD
           amount: number
           balance_after: number
           created_at: string
@@ -712,32 +439,6 @@ export type Database = {
           currency?: string
           id?: string
           updated_at?: string
-=======
-          admin_id: string | null
-          amount: number
-          created_at: string
-          id: string
-          note: string | null
-          type: string
-          user_id: string
-        }
-        Insert: {
-          admin_id?: string | null
-          amount: number
-          created_at?: string
-          id?: string
-          note?: string | null
-          type: string
-          user_id: string
-        }
-        Update: {
-          admin_id?: string | null
-          amount?: number
-          created_at?: string
-          id?: string
-          note?: string | null
-          type?: string
->>>>>>> 9a097937a83c99b045df78274b2e655078e2daaf
           user_id?: string
         }
         Relationships: []
@@ -747,7 +448,6 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-<<<<<<< HEAD
       assign_credential_to_order: {
         Args: { _order_id: string; _product_id: string }
         Returns: string
@@ -761,16 +461,6 @@ export type Database = {
           _description?: string
         }
         Returns: string
-=======
-      credit_wallet_from_payment: {
-        Args: {
-          _amount_paid: number
-          _provider: string
-          _raw: Json
-          _reference: string
-        }
-        Returns: Json
->>>>>>> 9a097937a83c99b045df78274b2e655078e2daaf
       }
       has_role: {
         Args: {
@@ -779,7 +469,6 @@ export type Database = {
         }
         Returns: boolean
       }
-<<<<<<< HEAD
       purchase_with_wallet: {
         Args: { _user_id: string; _product_id: string; _quantity: number }
         Returns: string
@@ -791,15 +480,6 @@ export type Database = {
       payment_provider: "paystack" | "nowpayments" | "manual"
       tx_status: "pending" | "success" | "failed" | "reversed"
       tx_type: "credit" | "debit"
-=======
-      purchase_product_atomic: {
-        Args: { _coupon_code?: string; _product_id: string; _user_id: string }
-        Returns: Json
-      }
-    }
-    Enums: {
-      app_role: "admin" | "user"
->>>>>>> 9a097937a83c99b045df78274b2e655078e2daaf
     }
     CompositeTypes: {
       [_ in never]: never
@@ -927,15 +607,11 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-<<<<<<< HEAD
       app_role: ["user", "admin"],
       order_status: ["pending", "completed", "pending_credentials", "failed", "refunded"],
       payment_provider: ["paystack", "nowpayments", "manual"],
       tx_status: ["pending", "success", "failed", "reversed"],
       tx_type: ["credit", "debit"],
-=======
-      app_role: ["admin", "user"],
->>>>>>> 9a097937a83c99b045df78274b2e655078e2daaf
     },
   },
 } as const
