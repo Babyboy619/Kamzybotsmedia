@@ -7,7 +7,7 @@ if [ -z "$GITHUB_PAT" ]; then
   exit 1
 fi
 
-REPO="https://$GITHUB_PAT@github.com/evilos619-cell/kamzybots-media.git"
+REPO="https://$GITHUB_PAT@github.com/Babyboy619/Kamzybotsmedia.git"
 
 # Clear stale locks
 find .git -name "*.lock" -delete 2>/dev/null || true

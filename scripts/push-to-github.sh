@@ -7,7 +7,7 @@ if [ -z "$GITHUB_PAT" ]; then
   exit 1
 fi
 
-REPO="https://$GITHUB_PAT@github.com/evilos619-cell/kamzybots-media.git"
+REPO="https://$GITHUB_PAT@github.com/Babyboy619/Kamzybotsmedia.git"
 
 # Clear any stale git lock files and abort any in-progress merge
 find .git -name "*.lock" -delete 2>/dev/null || true
@@ -36,4 +36,4 @@ fi
 
 # Force-push: Replit is always the source of truth
 git push origin HEAD:main --force
-echo "🚀 Successfully pushed to github.com/evilos619-cell/kamzybots-media (main)"
+echo "🚀 Successfully pushed to github.com/Babyboy619/Kamzybotsmedia (main)"
