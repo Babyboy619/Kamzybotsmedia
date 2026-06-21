@@ -539,7 +539,268 @@ app.post("/api/admin/users/:id/debit", async (req, res) => {
   } finally { client.release(); }
 });
 
+// ─── Payment: admin-debit (alias for /api/admin/users/:id/debit) ──────────────
+app.post("/api/payment/admin-debit", async (req, res) => {
+  if (!requireSupabase(res)) return;
+  const admin = await getAuthUser(req); if (!admin) return err(res, 401, "Unauthorized");
+  const { data: roles } = await supabaseAdmin!.from("user_roles").select("role").eq("user_id", admin.id).eq("role", "admin").limit(1);
+  if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
+  const { targetUserId, amount, description } = req.body as { targetUserId?: string; amount?: number; description?: string };
+  if (!targetUserId || !amount || amount <= 0 || !description) return err(res, 400, "targetUserId, amount and description are required");
+  if (!pool) return err(res, 500, "Database not configured");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const walletRes = await client.query(`SELECT id, balance FROM wallets WHERE user_id = $1 FOR UPDATE`, [targetUserId]);
+    if (walletRes.rowCount === 0) { await client.query("ROLLBACK"); return err(res, 404, "wallet not found"); }
+    const wallet = walletRes.rows[0];
+    const current = Number(wallet.balance ?? 0);
+    if (current < amount) { await client.query("ROLLBACK"); return err(res, 400, "insufficient balance"); }
+    const newBal = current - amount;
+    await client.query(`UPDATE wallets SET balance = $1, updated_at = now() WHERE id = $2`, [newBal, wallet.id]);
+    const txRef = `admin-debit-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    await client.query(`INSERT INTO wallet_transactions (wallet_id,user_id,type,amount,balance_after,status,provider,reference,description,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())`, [wallet.id, targetUserId, 'debit', amount, newBal, 'success', 'manual', txRef, description]);
+    await client.query(`INSERT INTO activity_logs (actor_id, action, target, metadata, created_at) VALUES ($1,$2,$3,$4, now())`, [admin.id, 'admin_debit_wallet', targetUserId, JSON.stringify({ amount, description })]);
+    await client.query("COMMIT");
+    return res.json({ success: true, newBalance: newBal });
+  } catch (e) {
+    await client.query("ROLLBACK"); console.error("admin-debit error:", e); return err(res, 500, "Internal server error");
+  } finally { client.release(); }
+});
+
 // Admin credit already exists as /api/payment/admin-credit
+
+// ─── Monnify payment routes ───────────────────────────────────────────────────
+const MONNIFY_API_KEY     = process.env.MONNIFY_API_KEY ?? "";
+const MONNIFY_SECRET_KEY  = process.env.MONNIFY_SECRET_KEY ?? "";
+const MONNIFY_BASE_URL    = process.env.MONNIFY_BASE_URL ?? "https://sandbox.monnify.com";
+const MONNIFY_CONTRACT    = process.env.MONNIFY_CONTRACT_CODE ?? "";
+
+async function getMonnifyToken(): Promise<string | null> {
+  if (!MONNIFY_API_KEY || !MONNIFY_SECRET_KEY) return null;
+  const creds = Buffer.from(`${MONNIFY_API_KEY}:${MONNIFY_SECRET_KEY}`).toString("base64");
+  try {
+    const r = await fetch(`${MONNIFY_BASE_URL}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { Authorization: `Basic ${creds}` },
+    });
+    if (!r.ok) return null;
+    const j = (await r.json()) as { responseBody?: { accessToken?: string } };
+    return j.responseBody?.accessToken ?? null;
+  } catch { return null; }
+}
+
+app.post("/api/payment/init-monnify", async (req, res) => {
+  if (!requireSupabase(res)) return;
+  const user = await getAuthUser(req); if (!user) return err(res, 401, "Unauthorized");
+  const { amount, userId, reference } = req.body as { amount?: number; userId?: string; reference?: string };
+  if (!amount || !userId || !reference) return err(res, 400, "amount, userId and reference are required");
+  if (userId !== user.id) return err(res, 403, "Forbidden");
+  if (!MONNIFY_API_KEY || !MONNIFY_SECRET_KEY || !MONNIFY_CONTRACT) return err(res, 500, "Monnify is not configured — contact support");
+
+  const token = await getMonnifyToken();
+  if (!token) return err(res, 502, "Could not authenticate with Monnify");
+
+  const siteUrl = process.env.VITE_SITE_URL ?? (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "");
+  const { data: intent } = await supabaseAdmin!.from("payment_intents").select("id").eq("reference", reference).eq("user_id", userId).single();
+  if (!intent) return err(res, 400, "Invalid payment reference");
+
+  try {
+    const r = await fetch(`${MONNIFY_BASE_URL}/api/v1/merchant/transactions/init-transaction`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount,
+        customerName: user.email ?? "Customer",
+        customerEmail: user.email ?? "noreply@kamzybots.com",
+        paymentReference: reference,
+        paymentDescription: "KAMZYBOT'S MEDIA — Wallet Funding",
+        currencyCode: "NGN",
+        contractCode: MONNIFY_CONTRACT,
+        redirectUrl: `${siteUrl}/wallet?funded=monnify`,
+        paymentMethods: ["CARD", "ACCOUNT_TRANSFER", "USSD"],
+      }),
+    });
+    if (!r.ok) { const t = await r.text(); return err(res, 502, `Monnify error: ${t}`); }
+    const j = (await r.json()) as { responseBody?: { checkoutUrl?: string; transactionReference?: string } };
+    return res.json({ checkoutUrl: j.responseBody?.checkoutUrl, transactionReference: j.responseBody?.transactionReference });
+  } catch { return err(res, 502, "Could not reach Monnify — please try again later"); }
+});
+
+app.post("/api/payment/verify-monnify", async (req, res) => {
+  if (!requireSupabase(res)) return;
+  const user = await getAuthUser(req); if (!user) return err(res, 401, "Unauthorized");
+  const { reference, userId } = req.body as { reference?: string; userId?: string };
+  if (!reference || !userId) return err(res, 400, "reference and userId are required");
+  if (userId !== user.id) return err(res, 403, "Forbidden");
+
+  const { data: intent } = await supabaseAdmin!.from("payment_intents").select("*").eq("reference", reference).eq("user_id", userId).single();
+  if (!intent) return err(res, 400, "Invalid payment reference");
+  if ((intent as Record<string, unknown>).status === "success") return res.json({ success: true, amount: Number((intent as Record<string, unknown>).amount), alreadyCredited: true });
+
+  if (!MONNIFY_API_KEY || !MONNIFY_SECRET_KEY) return err(res, 500, "Monnify is not configured");
+  const token = await getMonnifyToken();
+  if (!token) return err(res, 502, "Could not authenticate with Monnify");
+
+  try {
+    const encoded = encodeURIComponent(reference);
+    const r = await fetch(`${MONNIFY_BASE_URL}/api/v2/transactions/${encoded}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!r.ok) return err(res, 502, "Could not verify with Monnify");
+    const j = (await r.json()) as { responseBody?: { paymentStatus?: string; amountPaid?: number } };
+    if (j.responseBody?.paymentStatus !== "PAID") return err(res, 400, "Payment not confirmed");
+
+    const amount = j.responseBody?.amountPaid ?? Number((intent as Record<string, unknown>).amount);
+    const { error: creditErr } = await supabaseAdmin!.rpc("credit_wallet" as never, { _user_id: userId, _amount: amount, _provider: "monnify", _reference: reference, _description: "Wallet funded via Monnify" } as never);
+    if (creditErr) return err(res, 500, (creditErr as { message: string }).message);
+    await supabaseAdmin!.from("payment_intents").update({ status: "success", updated_at: new Date().toISOString() }).eq("reference", reference);
+    return res.json({ success: true, amount, alreadyCredited: false });
+  } catch { return err(res, 502, "Could not reach Monnify — please try again later"); }
+});
+
+// ─── Wallet ensure ────────────────────────────────────────────────────────────
+app.post("/api/wallet/ensure", async (req, res) => {
+  if (!requireSupabase(res)) return;
+  const user = await getAuthUser(req); if (!user) return err(res, 401, "Unauthorized");
+  const { userId } = req.body as { userId?: string };
+  if (!userId || userId !== user.id) return err(res, 403, "Forbidden");
+  try {
+    const { data: existing } = await supabaseAdmin!.from("wallets").select("id,balance,currency,updated_at").eq("user_id", userId).maybeSingle();
+    if (existing) return res.json({ wallet: existing });
+    const { data: created, error: insErr } = await supabaseAdmin!.from("wallets").insert({ user_id: userId, balance: 0, currency: "NGN" }).select("id,balance,currency,updated_at").single();
+    if (insErr) return err(res, 500, insErr.message);
+    return res.json({ wallet: created });
+  } catch (e) { console.error("wallet/ensure error:", e); return err(res, 500, "Internal server error"); }
+});
+
+// ─── Delivery routes ──────────────────────────────────────────────────────────
+app.post("/api/delivery/assign-credential", async (req, res) => {
+  if (!requireSupabase(res)) return;
+  const user = await getAuthUser(req); if (!user) return err(res, 401, "Unauthorized");
+  const { orderId, productId } = req.body as { orderId?: string; productId?: string };
+  if (!orderId || !productId) return err(res, 400, "orderId and productId are required");
+
+  // Verify user owns the order
+  const { data: order } = await supabaseAdmin!.from("orders").select("id,user_id").eq("id", orderId).single();
+  if (!order) return err(res, 404, "Order not found");
+  if ((order as Record<string, unknown>).user_id !== user.id) return err(res, 403, "Forbidden");
+
+  if (!pool) return err(res, 503, "Database not configured");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // FIFO: pick the oldest unassigned credential for this product
+    const credRes = await client.query(
+      `SELECT id, content, label FROM product_credentials WHERE product_id = $1 AND order_id IS NULL ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
+      [productId]
+    );
+    if (credRes.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.json({ assigned: false, content: null, label: null, message: "No available credentials — contact support" });
+    }
+    const cred = credRes.rows[0];
+    await client.query(
+      `UPDATE product_credentials SET order_id = $1, delivered_at = now() WHERE id = $2`,
+      [orderId, cred.id]
+    );
+    await client.query("COMMIT");
+    return res.json({ assigned: true, content: cred.content, label: cred.label ?? null });
+  } catch (e) {
+    await client.query("ROLLBACK"); console.error("assign-credential error:", e); return err(res, 500, "Internal server error");
+  } finally { client.release(); }
+});
+
+app.post("/api/delivery/admin-redispense", async (req, res) => {
+  if (!requireSupabase(res)) return;
+  const admin = await getAuthUser(req); if (!admin) return err(res, 401, "Unauthorized");
+  const { data: roles } = await supabaseAdmin!.from("user_roles").select("role").eq("user_id", admin.id).eq("role", "admin").limit(1);
+  if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
+  const { orderId, productId } = req.body as { orderId?: string; productId?: string };
+  if (!orderId || !productId) return err(res, 400, "orderId and productId are required");
+
+  if (!pool) return err(res, 503, "Database not configured");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const credRes = await client.query(
+      `SELECT id, content, label FROM product_credentials WHERE product_id = $1 AND order_id IS NULL ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
+      [productId]
+    );
+    if (credRes.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return res.json({ assigned: false, message: "No available credentials — add more in the Credentials panel" });
+    }
+    const cred = credRes.rows[0];
+    await client.query(
+      `UPDATE product_credentials SET order_id = $1, delivered_at = now() WHERE id = $2`,
+      [orderId, cred.id]
+    );
+    await client.query(`INSERT INTO activity_logs (actor_id, action, target, metadata, created_at) VALUES ($1,'admin_redispense_credential',$2,$3,now())`,
+      [admin.id, orderId, JSON.stringify({ productId, credentialId: cred.id })]);
+    await client.query("COMMIT");
+    return res.json({ assigned: true, content: cred.content, label: cred.label ?? null });
+  } catch (e) {
+    await client.query("ROLLBACK"); console.error("admin-redispense error:", e); return err(res, 500, "Internal server error");
+  } finally { client.release(); }
+});
+
+// ─── Products CRUD ────────────────────────────────────────────────────────────
+async function requireAdmin(req: express.Request, res: express.Response): Promise<string | null> {
+  if (!requireSupabase(res)) return null;
+  const user = await getAuthUser(req); if (!user) { err(res, 401, "Unauthorized"); return null; }
+  const { data: roles } = await supabaseAdmin!.from("user_roles").select("role").eq("user_id", user.id).eq("role", "admin").limit(1);
+  if (!roles || roles.length === 0) { err(res, 403, "Forbidden"); return null; }
+  return user.id;
+}
+
+app.post("/api/products/upsert", async (req, res) => {
+  const adminId = await requireAdmin(req, res); if (!adminId) return;
+  const body = req.body as Record<string, unknown>;
+  try {
+    if (body.id) {
+      const { id, ...rest } = body;
+      const { error } = await supabaseAdmin!.from("products").update(rest).eq("id", id as string);
+      if (error) return err(res, 500, error.message);
+      return res.json({ success: true });
+    } else {
+      const { error } = await supabaseAdmin!.from("products").insert(body);
+      if (error) return err(res, 500, error.message);
+      return res.json({ success: true });
+    }
+  } catch (e) { console.error("products/upsert error:", e); return err(res, 500, "Internal server error"); }
+});
+
+app.delete("/api/products/:id", async (req, res) => {
+  const adminId = await requireAdmin(req, res); if (!adminId) return;
+  const { error } = await supabaseAdmin!.from("products").delete().eq("id", req.params.id);
+  if (error) return err(res, 500, error.message);
+  return res.json({ success: true });
+});
+
+// ─── Categories CRUD ──────────────────────────────────────────────────────────
+app.post("/api/categories/upsert", async (req, res) => {
+  const adminId = await requireAdmin(req, res); if (!adminId) return;
+  const body = req.body as Record<string, unknown>;
+  try {
+    if (body.id) {
+      const { id, ...rest } = body;
+      const { error } = await supabaseAdmin!.from("product_categories").update(rest).eq("id", id as string);
+      if (error) return err(res, 500, error.message);
+    } else {
+      const { error } = await supabaseAdmin!.from("product_categories").insert(body);
+      if (error) return err(res, 500, error.message);
+    }
+    return res.json({ success: true });
+  } catch (e) { console.error("categories/upsert error:", e); return err(res, 500, "Internal server error"); }
+});
+
+app.delete("/api/categories/:id", async (req, res) => {
+  const adminId = await requireAdmin(req, res); if (!adminId) return;
+  const { error } = await supabaseAdmin!.from("product_categories").delete().eq("id", req.params.id);
+  if (error) return err(res, 500, error.message);
+  return res.json({ success: true });
+});
 
 // ─── Notifications APIs ─────────────────────────────────────────────────────
 app.post('/api/admin/notifications/send', async (req, res) => {
