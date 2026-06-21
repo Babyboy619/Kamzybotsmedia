@@ -3,6 +3,7 @@ import { Toaster } from "sonner";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 import { FloatingActions } from "@/components/layout/FloatingActions";
+import { AnnouncementBanner } from "@/components/layout/AnnouncementBanner";
 import HomePage from "@/routes/index";
 import AboutPage from "@/routes/about";
 import BlogPage from "@/routes/blog";
@@ -22,6 +23,7 @@ export default function App() {
   return (
     <>
       <SiteHeader />
+      <AnnouncementBanner />
       <main>
         <Routes>
           <Route path="/" element={<HomePage />} />

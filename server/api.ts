@@ -704,6 +704,11 @@ app.post("/api/delivery/assign-credential", async (req, res) => {
       `UPDATE product_credentials SET order_id = $1, delivered_at = now() WHERE id = $2`,
       [orderId, cred.id]
     );
+    // Also stamp delivered_payload on order_items so the user's orders page can display it
+    await client.query(
+      `UPDATE order_items SET delivered_payload = $1 WHERE order_id = $2 AND product_id = $3 AND delivered_payload IS NULL LIMIT 1`,
+      [cred.content, orderId, productId]
+    );
     await client.query("COMMIT");
     return res.json({ assigned: true, content: cred.content, label: cred.label ?? null });
   } catch (e) {
@@ -735,6 +740,11 @@ app.post("/api/delivery/admin-redispense", async (req, res) => {
     await client.query(
       `UPDATE product_credentials SET order_id = $1, delivered_at = now() WHERE id = $2`,
       [orderId, cred.id]
+    );
+    // Stamp delivered_payload on order_items so user can see it
+    await client.query(
+      `UPDATE order_items SET delivered_payload = $1 WHERE order_id = $2 AND product_id = $3 AND delivered_payload IS NULL LIMIT 1`,
+      [cred.content, orderId, productId]
     );
     await client.query(`INSERT INTO activity_logs (actor_id, action, target, metadata, created_at) VALUES ($1,'admin_redispense_credential',$2,$3,now())`,
       [admin.id, orderId, JSON.stringify({ productId, credentialId: cred.id })]);
