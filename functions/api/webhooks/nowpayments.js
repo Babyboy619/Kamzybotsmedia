@@ -12,17 +12,17 @@
 export async function onRequestPost({ request, env }) {
   const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
   const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || "";
-  const monifySecret = env.MONIFY_IPN_SECRET || "";
+  const monnifySecret = env.MONIFY_IPN_SECRET || "";
   const nowSecret = env.NOWPAYMENTS_IPN_SECRET || "";
-  const ipnSecret = monifySecret || nowSecret || "";
-  const provider = monifySecret ? "monify" : nowSecret ? "nowpayments" : "";
+  const ipnSecret = monnifySecret || nowSecret || "";
+  const provider = monnifySecret ? "monnify" : nowSecret ? "nowpayments" : "";
 
   if (!supabaseUrl || !serviceKey)
     return json({ error: "Server not configured" }, 503);
 
   // Read raw body first — needed for signature verification
   const body = await request.text();
-  const signature = request.headers.get(provider === "monify" ? "x-monify-sig" : "x-nowpayments-sig") || "";
+  const signature = request.headers.get(provider === "monnify" ? "x-monnify-sig" : "x-nowpayments-sig") || "";
 
   // Verify signature (uses NOWPayments-style HMAC verification function).
   if (ipnSecret) {
