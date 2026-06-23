@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { BankTransfersTab } from "@/components/admin/BankTransfersTab";
+import { BankTransfersTab } from "@/components/admin/BankTransfersTab";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { adminCreditWalletFn, adminDebitWalletFn } from "@/lib/api/payment";
@@ -109,6 +110,7 @@ function AdminDashboard({ adminUser }: { adminUser: import("@supabase/supabase-j
             <TabsTrigger value="orders"><ShoppingCart className="w-3.5 h-3.5 mr-1" />Orders</TabsTrigger>
             <TabsTrigger value="payments"><CreditCard className="w-3.5 h-3.5 mr-1" />Payments</TabsTrigger>
               <TabsTrigger value="bank-transfers"><CreditCard className="w-3.5 h-3.5 mr-1" />Bank Transfers</TabsTrigger>
+              <TabsTrigger value="bank-transfers"><CreditCard className="w-3.5 h-3.5 mr-1" />Bank Transfers</TabsTrigger>
               <TabsTrigger value="audit"><ClipboardList className="w-3.5 h-3.5 mr-1" />Audit</TabsTrigger>
               <TabsTrigger value="messages"><Tag className="w-3.5 h-3.5 mr-1" />Messages</TabsTrigger>
             <TabsTrigger value="analytics"><BarChart3 className="w-3.5 h-3.5 mr-1" />Analytics</TabsTrigger>
@@ -121,6 +123,7 @@ function AdminDashboard({ adminUser }: { adminUser: import("@supabase/supabase-j
           <TabsContent value="sold"><SoldTab /></TabsContent>
           <TabsContent value="orders"><OrdersTab /></TabsContent>
           <TabsContent value="payments"><PaymentsTab /></TabsContent>
+          <TabsContent value="bank-transfers"><BankTransfersTab /></TabsContent>
           <TabsContent value="bank-transfers"><BankTransfersTab /></TabsContent>
           <TabsContent value="audit"><AuditTab /></TabsContent>
           <TabsContent value="messages"><MessagesTab /></TabsContent>
