@@ -3,9 +3,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
 const BANK_DETAILS = {
-  bankName: "UBA",
-  accountNumber: "2136011152",
-  accountName: "Akintan Ayomide Olamilekan",
+  bankName: "Moniepoint MFB",
+  accountNumber: "6663788595",
+  accountName: "Abdullahi Kamaludeen",
 };
 
 export default function BankTransferTopup({ userId }: { userId: string }) {
