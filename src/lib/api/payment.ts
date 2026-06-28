@@ -27,9 +27,16 @@ async function callApi<T>(path: string, body: Record<string, unknown>): Promise<
   return res.json() as Promise<T>;
 }
 
-export async function verifyPaystackPayment(data: { reference: string; userId: string }) {
+export async function initOpayPayment(data: { amount: number; userId: string; reference: string }) {
+  return callApi<{ checkoutUrl: string; orderNo: string }>(
+    "/api/payment/init-opay",
+    data
+  );
+}
+
+export async function verifyOpayPayment(data: { reference: string; userId: string }) {
   return callApi<{ success: boolean; amount: number; alreadyCredited: boolean }>(
-    "/api/payment/verify-paystack",
+    "/api/payment/verify-opay",
     data
   );
 }

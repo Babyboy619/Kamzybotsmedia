@@ -12,7 +12,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { assignCredentialToOrder } from "@/lib/api/delivery";
-import { PaystackTopUpDialog } from "@/components/wallet/PaystackTopUpDialog";
 
 type DbCategory = { id: string; name: string; slug: string; description: string | null };
 type Product = { id: string; title: string; price: number; stock: number; description: string | null; image_url: string | null; slug: string; currency: string };
