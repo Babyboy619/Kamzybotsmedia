@@ -1,580 +1,160 @@
-import BankTransferTopup from "@/components/BankTransferTopup";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { useEffect, useRef, useState } from "react";
-import { Loader2, Wallet, ArrowDownCircle, ArrowUpCircle, Bitcoin, CreditCard, CheckCircle2, RefreshCw, AlertCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router";
+import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { isSupabaseConfigured, supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/lib/auth";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { verifyPaystackPayment, createNowPaymentsInvoice, checkNowPaymentsStatus, initMonnifyPayment, verifyMonnifyPayment } from "@/lib/api/payment";
+import { initOpayPayment, verifyOpayPayment, createNowPaymentsInvoice, checkNowPaymentsStatus, initMonnifyPayment, verifyMonnifyPayment } from "@/lib/api/payment";
+import { useAuth } from "@/hooks/use-auth";
+import { supabase, isSupabaseConfigured } from "@/integrations/supabase/client";
+import { Loader2, Wallet as WalletIcon, ArrowDownCircle, ArrowUpCircle, CreditCard, Bitcoin, RefreshCw } from "lucide-react";
 
 type WalletRow = { id: string; balance: number; currency: string; updated_at: string };
 type Tx = { id: string; type: "credit" | "debit"; amount: number; balance_after: number; status: string; provider: string | null; description: string | null; created_at: string };
 
-declare global { interface Window { PaystackPop: { setup(o: Record<string, unknown>): { openIframe(): void } } } }
-
 async function getFreshToken(): Promise<string | null> {
-  if (!isSupabaseConfigured()) return null;
-  try {
-    const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ?? null;
-  } catch {
-    return null;
-  }
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? null;
 }
 
-const RETRY_DELAY_MS = 2000;
-const MAX_ATTEMPTS   = 3;
-
-/**
- * Ensures the user has a wallet row.
- * Strategy (each attempt):
- *   1. SELECT existing wallet (idempotency — never duplicate-create)
- *   2. POST /api/wallet/ensure  (CF Pages Function, uses service role)
- *   3. ensure_user_wallet() RPC (SECURITY DEFINER fallback)
- *   4. Direct INSERT via anon client (wallets_self_insert policy)
- *
- * Returns { wallet, error } after up to MAX_ATTEMPTS tries.
- */
-async function ensureWalletWithRetry(
-  userId: string,
-): Promise<{ wallet: WalletRow | null; error: string | null }> {
-  let lastError = "Wallet unavailable — please retry";
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    console.log(`[Wallet] ensureWallet attempt ${attempt}/${MAX_ATTEMPTS} for user ${userId}`);
-
-    // ── Step 1: idempotency — check if wallet already exists ─────────────
-    try {
-      const { data: existing, error: selErr } = await supabase
-        .from("wallets")
-        .select("id,balance,currency,updated_at")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      if (selErr) {
-        console.warn(`[Wallet] attempt ${attempt} SELECT error:`, selErr.message, `(code ${selErr.code})`);
-        lastError = `DB error: ${selErr.message} (${selErr.code})`;
-      } else if (existing) {
-        console.log(`[Wallet] attempt ${attempt} wallet found via SELECT`);
-        return { wallet: existing as WalletRow, error: null };
-      }
-    } catch (e) {
-      console.warn(`[Wallet] attempt ${attempt} SELECT threw:`, e);
-    }
-
-    // ── Step 2: server-side CF Pages Function ────────────────────────────
-    const token = await getFreshToken();
-    if (token) {
-      try {
-        const res = await fetch("/api/wallet/ensure", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ userId }),
-          signal: AbortSignal.timeout(10_000),
-        });
-
-        if (res.ok) {
-          const data = await res.json() as { wallet: WalletRow };
-          console.log(`[Wallet] attempt ${attempt} wallet ensured via /api/wallet/ensure`);
-          return { wallet: data.wallet, error: null };
-        }
-
-        const errData = await res.json().catch(() => ({})) as { error?: string };
-        const reason  = errData.error ?? `HTTP ${res.status}`;
-        console.warn(`[Wallet] attempt ${attempt} /api/wallet/ensure failed: ${reason}`);
-        lastError = `Server error: ${reason}`;
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn(`[Wallet] attempt ${attempt} /api/wallet/ensure threw: ${msg}`);
-        lastError = `Network error: ${msg}`;
-      }
-    } else {
-      console.warn(`[Wallet] attempt ${attempt} no auth token — skipping server call`);
-      lastError = "Not authenticated — please sign in again";
-    }
-
-    // ── Step 3: SECURITY DEFINER RPC ─────────────────────────────────────
-    try {
-      const { data: rpcRows, error: rpcErr } = await supabase.rpc("ensure_user_wallet" as never);
-      if (rpcErr) {
-        console.warn(`[Wallet] attempt ${attempt} ensure_user_wallet RPC error:`, rpcErr.message, `(${rpcErr.code})`);
-        lastError = `RPC error: ${rpcErr.message} (${rpcErr.code})`;
-      } else {
-        const row = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
-        if (row) {
-          console.log(`[Wallet] attempt ${attempt} wallet ensured via RPC`);
-          return { wallet: row as WalletRow, error: null };
-        }
-      }
-    } catch (e) {
-      console.warn(`[Wallet] attempt ${attempt} RPC threw:`, e);
-    }
-
-    // ── Step 4: direct INSERT (wallets_self_insert policy) ───────────────
-    try {
-      const { data: created, error: insErr } = await supabase
-        .from("wallets")
-        .insert({ user_id: userId, balance: 0, currency: "NGN" })
-        .select("id,balance,currency,updated_at")
-        .maybeSingle();
-
-      if (insErr) {
-        console.warn(`[Wallet] attempt ${attempt} INSERT error:`, insErr.message, `(${insErr.code})`);
-        lastError = `Insert error: ${insErr.message} (${insErr.code})`;
-      } else if (created) {
-        console.log(`[Wallet] attempt ${attempt} wallet created via direct INSERT`);
-        return { wallet: created as WalletRow, error: null };
-      }
-    } catch (e) {
-      console.warn(`[Wallet] attempt ${attempt} INSERT threw:`, e);
-    }
-
-    // Pause before next attempt
-    if (attempt < MAX_ATTEMPTS) {
-      console.log(`[Wallet] retrying in ${RETRY_DELAY_MS}ms…`);
-      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-    }
-  }
-
-  console.error(`[Wallet] all ${MAX_ATTEMPTS} attempts failed. Last error: ${lastError}`);
-  return { wallet: null, error: lastError };
-}
-
-export default function WalletPage() {
+export default function Wallet() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [wallet, setWallet] = useState<WalletRow | null>(null);
   const [transactions, setTransactions] = useState<Tx[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
   const [walletError, setWalletError] = useState<string | null>(null);
-  const psLoaded = useRef(false);
 
   useEffect(() => { if (!loading && !user) navigate("/auth?redirect=/wallet"); }, [user, loading, navigate]);
-
-  useEffect(() => {
-    if (psLoaded.current) return;
-    const existing = document.querySelector('script[src="https://js.paystack.co/v1/inline.js"]');
-    if (!existing) {
-      const s = document.createElement("script");
-      s.src = "https://js.paystack.co/v1/inline.js";
-      s.async = true;
-      document.body.appendChild(s);
-    }
-    psLoaded.current = true;
-  }, []);
 
   const fetchData = async () => {
     if (!user) return;
     setDataLoading(true);
     setWalletError(null);
+    try {
+      const { data: w, error: wErr } = await supabase.from("wallets").select("*").eq("user_id", user.id).maybeSingle();
+      if (wErr) throw wErr;
+      setWallet(w as WalletRow | null);
 
-    const [{ wallet: walletRow, error: walletErr }, txResult] = await Promise.all([
-      ensureWalletWithRetry(user.id),
-      (async (): Promise<Tx[]> => {
-        if (!isSupabaseConfigured()) return [];
-        try {
-          const { data, error } = await supabase
-            .from("wallet_transactions")
-            .select("*")
-            .eq("user_id", user.id)
-            .order("created_at", { ascending: false })
-            .limit(50);
-          if (error) console.warn("[Wallet] tx fetch error:", error.message);
-          return (data as Tx[]) ?? [];
-        } catch { return []; }
-      })(),
-    ]);
-
-    setWallet(walletRow);
-    setTransactions(txResult);
-
-    if (!walletRow) {
-      setWalletError(walletErr ?? "Unable to load wallet — please try again");
+      const { data: txs, error: txErr } = await supabase
+        .from("wallet_transactions")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (txErr) throw txErr;
+      setTransactions((txs as Tx[]) ?? []);
+    } catch (e: unknown) {
+      setWalletError(e instanceof Error ? e.message : "Failed to load wallet data");
+    } finally {
+      setDataLoading(false);
     }
-
-    setDataLoading(false);
   };
 
   useEffect(() => { if (user) fetchData(); }, [user]);
 
-  // Handle Paystack callback redirect: /wallet?ref=REF&userId=UID
+  // Realtime updates for wallet + transactions
+  useEffect(() => {
+    if (!user || !isSupabaseConfigured()) return;
+    const channel = supabase
+      .channel(`wallet-${user.id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "wallets", filter: `user_id=eq.${user.id}` }, () => fetchData())
+      .on("postgres_changes", { event: "*", schema: "public", table: "wallet_transactions", filter: `user_id=eq.${user.id}` }, () => fetchData())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user]);
+
+  // Handle payment callback redirect: /wallet?ref=REF&userId=UID&provider=opay|monnify
   useEffect(() => {
     const ref      = searchParams.get("ref");
     const userId   = searchParams.get("userId");
     const provider = searchParams.get("provider");
+    const cancelled = searchParams.get("cancelled");
     if (!ref || !userId || !user) return;
+    if (cancelled === "1") { toast.info("Payment cancelled"); return; }
 
     const tid = toast.loading("Verifying your payment…");
     const verify = provider === "monnify"
       ? verifyMonnifyPayment({ reference: ref, userId })
-      : verifyPaystackPayment({ reference: ref, userId });
+      : verifyOpayPayment({ reference: ref, userId });
 
     verify
       .then((result) => {
         toast.dismiss(tid);
-        if (result.alreadyCredited) toast.info("Payment already credited to your wallet.");
-        else toast.success(`₦${result.amount?.toLocaleString("en-NG")} added to your wallet!`);
+        if (result.alreadyCredited) toast.info("Payment already credited");
+        else toast.success(`₦${result.amount?.toLocaleString()} added to your wallet!`);
         fetchData();
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         toast.dismiss(tid);
         toast.error(err instanceof Error ? err.message : "Verification failed — contact support");
+      })
+      .finally(() => {
+        searchParams.delete("ref");
+        searchParams.delete("userId");
+        searchParams.delete("provider");
+        searchParams.delete("cancelled");
+        setSearchParams(searchParams, { replace: true });
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [searchParams, user]);
 
-  useEffect(() => {
-    const funded = searchParams.get("funded");
-    if (funded === "1")      toast.success("Payment submitted! Your wallet will be credited shortly.");
-    else if (funded === "crypto") toast.info("Crypto payment received — your wallet will update automatically.");
-  }, [searchParams]);
-
-  useEffect(() => {
-    if (!user || !isSupabaseConfigured()) return;
-    let ch: ReturnType<typeof supabase.channel> | null = null;
-    try {
-      ch = supabase.channel("wallet-rt")
-        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "wallets", filter: `user_id=eq.${user.id}` }, () => fetchData())
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "wallet_transactions", filter: `user_id=eq.${user.id}` }, () => fetchData())
-        .subscribe();
-    } catch { /* realtime optional */ }
-    return () => { if (ch) supabase.removeChannel(ch).catch(() => {}); };
-  }, [user]);
-
-  if (loading || !user) return <div className="min-h-[60vh] flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-brand-orange" /></div>;
-
-  return (
-    <div className="min-h-[calc(100vh-200px)] bg-background py-8 px-4">
-      <div className="max-w-4xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-brand-navy">My Wallet</h1>
-          <p className="text-muted-foreground text-sm mt-1">Manage your balance and fund your account</p>
-        </div>
-
-        {!isSupabaseConfigured() && (
-          <Card className="mb-6 border-yellow-200 bg-yellow-50">
-            <CardContent className="p-4 flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-yellow-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-medium text-yellow-800">Configuration Required</p>
-                <p className="text-xs text-yellow-700 mt-0.5">Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable wallet features.</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {walletError && !dataLoading && (
-          <Card className="mb-6 border-red-200 bg-red-50">
-            <CardContent className="p-4 flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-red-800">Wallet could not be loaded</p>
-                <p className="text-xs text-red-600 mt-0.5 font-mono break-all">{walletError}</p>
-                <p className="text-xs text-red-500 mt-1">Open browser DevTools → Console to see full diagnostics.</p>
-              </div>
-              <Button size="sm" variant="outline" onClick={fetchData} className="shrink-0 text-xs border-red-300 text-red-700 hover:bg-red-100">
-                <RefreshCw className="w-3 h-3 mr-1" />Retry
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {dataLoading ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3">
-            <Loader2 className="w-6 h-6 animate-spin text-brand-orange" />
-            <p className="text-xs text-muted-foreground">Setting up your wallet…</p>
-          </div>
-        ) : (
-          <>
-            <div className="bg-gradient-to-br from-brand-navy to-brand-navy/90 text-white rounded-2xl p-6 mb-6 relative overflow-hidden">
-              <div className="absolute inset-0 opacity-5" style={{ backgroundImage: "radial-gradient(circle at 80% 20%, #f97316 0%, transparent 60%)" }} />
-              <div className="relative">
-                <div className="flex items-center gap-2 mb-3">
-                  <Wallet className="w-5 h-5 text-brand-orange" />
-                  <span className="text-white/70 text-sm">Available Balance</span>
-                  <button onClick={fetchData} className="ml-auto text-white/50 hover:text-white transition-colors" title="Refresh balance"><RefreshCw className="w-4 h-4" /></button>
-                </div>
-                <div className="text-3xl sm:text-4xl font-bold mb-1">
-                  ₦{(wallet?.balance ?? 0).toLocaleString("en-NG", { minimumFractionDigits: 2 })}
-                </div>
-                <div className="text-white/40 text-xs">{wallet?.currency ?? "NGN"} · Updated {wallet?.updated_at ? new Date(wallet.updated_at).toLocaleTimeString() : "—"}</div>
-              </div>
-            </div>
-
-            <Tabs defaultValue="fund" className="w-full">
-              <TabsList className="mb-6">
-                <TabsTrigger value="fund">Fund Wallet</TabsTrigger>
-                <TabsTrigger value="history">Transaction History</TabsTrigger>
-                <TabsTrigger value="bank">Bank Transfer</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="fund">
-                <FundWallet user={user} wallet={wallet} onFunded={fetchData} />
-              </TabsContent>
-
-              <TabsContent value="bank">
-                  <BankTransferTopup userId={user.id} />
-                </TabsContent>
-
-                <TabsContent value="history">
-                <TransactionList transactions={transactions} />
-              </TabsContent>
-            </Tabs>
-          </>
-        )}
+  if (loading || !user) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-brand-orange" />
       </div>
-    </div>
-  );
-}
-
-const PRESETS = [1000, 2000, 5000, 10000, 20000, 50000];
-
-function FundWallet({ user, wallet, onFunded }: { user: import("@supabase/supabase-js").User; wallet: WalletRow | null; onFunded: () => void }) {
-  const [amount, setAmount] = useState("");
-  const [psLoading, setPsLoading] = useState(false);
-  const [monnifyLoading, setMonnifyLoading] = useState(false);
-  const [nowLoading, setNowLoading] = useState(false);
-  const [cryptoPending, setCryptoPending] = useState<{ reference: string } | null>(null);
-  const [checkingStatus, setCheckingStatus] = useState(false);
-
-  const genRef = () => `ss-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-  const amt = parseFloat(amount || "0");
-
-  const ensureWalletBeforePayment = async (): Promise<boolean> => {
-    if (wallet) return true;
-    const { wallet: w, error } = await ensureWalletWithRetry(user.id);
-    if (!w) { toast.error(`Could not create wallet: ${error}`); return false; }
-    return true;
-  };
-
-  const handlePaystack = async () => {
-    if (amt < 100) return toast.error("Minimum amount is ₦100");
-    if (!isSupabaseConfigured()) return toast.error("Supabase not configured — add credentials to Replit Secrets");
-
-    const publicKey = import.meta.env.VITE_PAYSTACK_PUBLIC_KEY as string | undefined;
-    if (!publicKey) return toast.error("Paystack is not configured — contact admin");
-    if (!window.PaystackPop) return toast.error("Paystack is still loading — please wait a moment and try again");
-
-    setPsLoading(true);
-    const ready = await ensureWalletBeforePayment();
-    if (!ready) { setPsLoading(false); return; }
-
-    const ref = genRef();
-    try {
-      const { error: intentErr } = await supabase.from("payment_intents").insert({
-        user_id: user.id, provider: "paystack", reference: ref, amount: amt, currency: "NGN", status: "pending",
-      });
-      setPsLoading(false);
-      if (intentErr) return toast.error(`Failed to initialize payment: ${intentErr.message}`);
-    } catch (e) {
-      setPsLoading(false);
-      return toast.error("Failed to initialize payment — check your connection");
-    }
-
-    const handler = window.PaystackPop.setup({
-      key: publicKey,
-      email: user.email,
-      amount: Math.round(amt * 100),
-      ref,
-      currency: "NGN",
-      metadata: { userId: user.id },
-      onSuccess: async (tx: { reference: string }) => {
-        const tid = toast.loading("Verifying payment…");
-        try {
-          const result = await verifyPaystackPayment({ reference: tx.reference, userId: user.id });
-          toast.dismiss(tid);
-          if (result.alreadyCredited) toast.info("Payment already credited");
-          else toast.success(`₦${result.amount?.toLocaleString()} added to your wallet!`);
-          onFunded();
-          setAmount("");
-        } catch (err: unknown) {
-          toast.dismiss(tid);
-          toast.error(err instanceof Error ? err.message : "Verification failed — contact support");
-        }
-      },
-      onCancel: () => toast.info("Payment cancelled"),
-    });
-
-    handler.openIframe();
-  };
-
-  const handleMonnify = async () => {
-    if (amt < 100) return toast.error("Minimum amount is ₦100");
-    if (!isSupabaseConfigured()) return toast.error("Supabase not configured — add credentials to Replit Secrets");
-
-    setMonnifyLoading(true);
-    const ready = await ensureWalletBeforePayment();
-    if (!ready) { setMonnifyLoading(false); return; }
-
-    const ref = genRef();
-    try {
-      const result = await initMonnifyPayment({ amount: amt, userId: user.id, reference: ref });
-      setMonnifyLoading(false);
-      if (result.checkoutUrl) {
-        window.location.href = result.checkoutUrl;
-      }
-    } catch (err: unknown) {
-      setMonnifyLoading(false);
-      toast.error(err instanceof Error ? err.message : "Failed to initialize Monnify payment");
-    }
-  };
-
-  const handleNowPayments = async () => {
-    if (amt < 100) return toast.error("Minimum amount is ₦100");
-    if (!isSupabaseConfigured()) return toast.error("Supabase not configured — add credentials to Replit Secrets");
-
-    setNowLoading(true);
-    const ready = await ensureWalletBeforePayment();
-    if (!ready) { setNowLoading(false); return; }
-
-    const ref = genRef();
-    try {
-      const { error: intentErr } = await supabase.from("payment_intents").insert({
-        user_id: user.id, provider: "nowpayments", reference: ref, amount: amt, currency: "NGN", status: "pending",
-      });
-      if (intentErr) { setNowLoading(false); return toast.error(`Failed to initialize payment: ${intentErr.message}`); }
-
-      const result = await createNowPaymentsInvoice({ amount: amt, userId: user.id, reference: ref });
-      setNowLoading(false);
-      if (result.invoiceUrl) {
-        setCryptoPending({ reference: ref });
-        window.open(result.invoiceUrl, "_blank");
-        toast.info("Complete your payment in the new tab — your wallet will update automatically when confirmed.");
-      }
-    } catch (err: unknown) {
-      setNowLoading(false);
-      toast.error(err instanceof Error ? err.message : "Failed to create invoice");
-    }
-  };
-
-  const handleCheckStatus = async () => {
-    if (!cryptoPending) return;
-    setCheckingStatus(true);
-    try {
-      const result = await checkNowPaymentsStatus({ reference: cryptoPending.reference, userId: user.id });
-      setCheckingStatus(false);
-      if (result.status === "success") {
-        toast.success(result.alreadyCredited ? "Already credited!" : "Wallet credited successfully!");
-        onFunded();
-        setCryptoPending(null);
-        setAmount("");
-      } else {
-        toast.info(`Payment status: ${result.status} — waiting for blockchain confirmation.`);
-      }
-    } catch (err: unknown) {
-      setCheckingStatus(false);
-      toast.error(err instanceof Error ? err.message : "Failed to check status");
-    }
-  };
+    );
+  }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-brand-navy flex items-center gap-2 text-base">
-            <CreditCard className="w-5 h-5 text-brand-orange" />Pay with Paystack
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">Pay via card, bank transfer, or USSD — instant credit.</p>
-          <div>
-            <Label className="text-xs font-medium text-muted-foreground mb-2 block">Quick amounts</Label>
-            <div className="flex flex-wrap gap-2">
-              {PRESETS.map((p) => (
-                <button key={p} onClick={() => setAmount(String(p))}
-                  className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${amount === String(p) ? "bg-brand-orange text-white border-brand-orange" : "border-border hover:border-brand-orange hover:text-brand-orange"}`}>
-                  ₦{p.toLocaleString()}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <Label htmlFor="ps-amount">Amount (₦)</Label>
-            <Input id="ps-amount" type="number" min="100" placeholder="Enter amount" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1" />
-          </div>
-          <Button onClick={handlePaystack} disabled={psLoading || amt < 100} className="w-full bg-brand-orange hover:bg-brand-orange-hover text-white">
-            {psLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            Pay ₦{amt > 0 ? amt.toLocaleString() : "—"} with Paystack
-          </Button>
-        </CardContent>
-      </Card>
+    <div className="container mx-auto px-4 py-8 max-w-3xl">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-brand-navy flex items-center gap-2">
+          <WalletIcon className="w-6 h-6 text-brand-orange" />My Wallet
+        </h1>
+        <p className="text-muted-foreground text-sm mt-1">Fund your wallet to make instant purchases.</p>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-brand-navy flex items-center gap-2 text-base">
-            <CreditCard className="w-5 h-5 text-brand-orange" />Pay with Monnify
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">Pay via card, bank transfer, or USSD — powered by Monnify.</p>
-          <div>
-            <Label className="text-xs font-medium text-muted-foreground mb-2 block">Quick amounts</Label>
-            <div className="flex flex-wrap gap-2">
-              {PRESETS.map((p) => (
-                <button key={p} onClick={() => setAmount(String(p))}
-                  className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${amount === String(p) ? "bg-brand-orange text-white border-brand-orange" : "border-border hover:border-brand-orange hover:text-brand-orange"}`}>
-                  ₦{p.toLocaleString()}
-                </button>
-              ))}
+      <Card className="mb-6 bg-gradient-to-br from-brand-navy to-brand-navy/90 text-white border-none">
+        <CardContent className="p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-white/70">Available Balance</p>
+              {dataLoading ? (
+                <Loader2 className="w-6 h-6 animate-spin mt-2" />
+              ) : (
+                <p className="text-3xl font-bold mt-1">₦{Number(wallet?.balance ?? 0).toLocaleString()}</p>
+              )}
             </div>
-          </div>
-          <div>
-            <Label htmlFor="mn-amount">Amount (₦)</Label>
-            <Input id="mn-amount" type="number" min="100" placeholder="Enter amount" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1" />
-          </div>
-          <Button onClick={handleMonnify} disabled={monnifyLoading || amt < 100} className="w-full bg-brand-orange hover:bg-brand-orange-hover text-white">
-            {monnifyLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            Pay ₦{amt > 0 ? amt.toLocaleString() : "—"} with Monnify
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-brand-navy flex items-center gap-2 text-base">
-            <Bitcoin className="w-5 h-5 text-brand-orange" />Pay with Crypto
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">Fund via Bitcoin, USDT, ETH and 50+ cryptocurrencies via NOWPayments.</p>
-          <div>
-            <Label className="text-xs font-medium text-muted-foreground mb-2 block">Quick amounts</Label>
-            <div className="flex flex-wrap gap-2">
-              {PRESETS.map((p) => (
-                <button key={p} onClick={() => setAmount(String(p))}
-                  className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${amount === String(p) ? "bg-brand-orange text-white border-brand-orange" : "border-border hover:border-brand-orange hover:text-brand-orange"}`}>
-                  ₦{p.toLocaleString()}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div>
-            <Label htmlFor="np-amount">Amount (₦ equivalent)</Label>
-            <Input id="np-amount" type="number" min="100" placeholder="Enter amount" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1" />
-          </div>
-          {cryptoPending ? (
-            <div className="space-y-3">
-              <div className="flex items-start gap-2 text-sm text-sky-700 bg-sky-50 p-3 rounded-lg">
-                <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
-                Invoice created — your wallet will update automatically once the network confirms. You can also check manually below.
-              </div>
-              <Button onClick={handleCheckStatus} disabled={checkingStatus} variant="outline" className="w-full border-brand-orange text-brand-orange hover:bg-brand-orange hover:text-white">
-                {checkingStatus ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
-                Check Payment Status
-              </Button>
-              <button onClick={() => setCryptoPending(null)} className="text-xs text-muted-foreground hover:text-brand-navy transition-colors w-full text-center">Start over</button>
-            </div>
-          ) : (
-            <Button onClick={handleNowPayments} disabled={nowLoading || amt < 100} variant="outline" className="w-full border-brand-navy text-brand-navy hover:bg-brand-navy hover:text-white">
-              {nowLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-              Pay with Crypto (NOWPayments)
+            <Button variant="ghost" size="icon" onClick={fetchData} className="text-white hover:bg-white/10">
+              <RefreshCw className={`w-5 h-5 ${dataLoading ? "animate-spin" : ""}`} />
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {walletError && (
+        <Card className="mb-6 border-destructive/50 bg-destructive/5">
+          <CardContent className="p-4 text-sm text-destructive">{walletError}</CardContent>
+        </Card>
+      )}
+
+      <FundWallet user={user} wallet={wallet} onFunded={fetchData} />
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="text-brand-navy text-base">Transaction History</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {dataLoading ? (
+            <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-brand-orange" /></div>
+          ) : transactions.length === 0 ? (
+            <p className="text-center text-muted-foreground py-8 text-sm">No transactions yet.</p>
+          ) : (
+            <TransactionList transactions={transactions} />
           )}
         </CardContent>
       </Card>
@@ -583,17 +163,6 @@ function FundWallet({ user, wallet, onFunded }: { user: import("@supabase/supaba
 }
 
 function TransactionList({ transactions }: { transactions: Tx[] }) {
-  if (transactions.length === 0) {
-    return (
-      <Card className="text-center py-12">
-        <CardContent>
-          <Wallet className="w-10 h-10 text-muted-foreground mx-auto mb-3 mt-4" />
-          <p className="text-muted-foreground text-sm">No transactions yet. Fund your wallet to get started!</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <div className="space-y-2">
       {transactions.map((tx) => (
@@ -624,6 +193,195 @@ function TransactionList({ transactions }: { transactions: Tx[] }) {
           </CardContent>
         </Card>
       ))}
+    </div>
+  );
+}
+
+const PRESETS = [1000, 2000, 5000, 10000, 20000, 50000];
+
+function FundWallet({ user, wallet, onFunded }: { user: import("@supabase/supabase-js").User; wallet: WalletRow | null; onFunded: () => void }) {
+  const [amount, setAmount] = useState("");
+  const [opayLoading, setOpayLoading] = useState(false);
+  const [monnifyLoading, setMonnifyLoading] = useState(false);
+  const [nowLoading, setNowLoading] = useState(false);
+  const [cryptoPending, setCryptoPending] = useState<{ reference: string } | null>(null);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+
+  const genRef = () => `ss-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+  const amt = parseFloat(amount || "0");
+
+  const ensureWalletBeforePayment = async (): Promise<boolean> => {
+    if (wallet) return true;
+    try {
+      const { error } = await supabase.rpc("ensure_user_wallet" as never);
+      if (error) { toast.error("Could not set up your wallet — try again"); return false; }
+      return true;
+    } catch {
+      toast.error("Could not set up your wallet — try again");
+      return false;
+    }
+  };
+
+  const handleOpay = async () => {
+    if (amt < 100) return toast.error("Minimum amount is ₦100");
+    if (!isSupabaseConfigured()) return toast.error("Supabase not configured — add credentials to Replit Secrets");
+
+    setOpayLoading(true);
+    const ready = await ensureWalletBeforePayment();
+    if (!ready) { setOpayLoading(false); return; }
+
+    const ref = genRef();
+    try {
+      const result = await initOpayPayment({ amount: amt, userId: user.id, reference: ref });
+      setOpayLoading(false);
+      if (result.checkoutUrl) {
+        window.location.href = result.checkoutUrl;
+      }
+    } catch (err: unknown) {
+      setOpayLoading(false);
+      toast.error(err instanceof Error ? err.message : "Failed to initialize Opay payment");
+    }
+  };
+
+  const handleMonnify = async () => {
+    if (amt < 100) return toast.error("Minimum amount is ₦100");
+    if (!isSupabaseConfigured()) return toast.error("Supabase not configured — add credentials to Replit Secrets");
+
+    setMonnifyLoading(true);
+    const ready = await ensureWalletBeforePayment();
+    if (!ready) { setMonnifyLoading(false); return; }
+
+    const ref = genRef();
+    try {
+      const result = await initMonnifyPayment({ amount: amt, userId: user.id, reference: ref });
+      setMonnifyLoading(false);
+      if (result.checkoutUrl) {
+        window.location.href = result.checkoutUrl;
+      }
+    } catch (err: unknown) {
+      setMonnifyLoading(false);
+      toast.error(err instanceof Error ? err.message : "Failed to initialize Monnify payment");
+    }
+  };
+
+  const handleCrypto = async () => {
+    if (amt < 500) return toast.error("Minimum amount is ₦500 for crypto payments");
+    if (!isSupabaseConfigured()) return toast.error("Supabase not configured — add credentials to Replit Secrets");
+
+    setNowLoading(true);
+    const ready = await ensureWalletBeforePayment();
+    if (!ready) { setNowLoading(false); return; }
+
+    const ref = genRef();
+    try {
+      const result = await createNowPaymentsInvoice({ amount: amt, userId: user.id, reference: ref });
+      setNowLoading(false);
+      if (result.invoiceUrl) {
+        setCryptoPending({ reference: ref });
+        window.open(result.invoiceUrl, "_blank");
+      }
+    } catch (err: unknown) {
+      setNowLoading(false);
+      toast.error(err instanceof Error ? err.message : "Failed to create crypto invoice");
+    }
+  };
+
+  const handleCheckCryptoStatus = async () => {
+    if (!cryptoPending) return;
+    setCheckingStatus(true);
+    try {
+      const result = await checkNowPaymentsStatus({ reference: cryptoPending.reference, userId: user.id });
+      setCheckingStatus(false);
+      if (result.alreadyCredited) {
+        toast.success("Payment confirmed and credited!");
+        setCryptoPending(null);
+        onFunded();
+        setAmount("");
+      } else {
+        toast.info(`Payment status: ${result.status ?? "pending"} — check again in a moment`);
+      }
+    } catch (err: unknown) {
+      setCheckingStatus(false);
+      toast.error(err instanceof Error ? err.message : "Failed to check payment status");
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-brand-navy flex items-center gap-2 text-base">
+            <CreditCard className="w-5 h-5 text-brand-orange" />Pay with Opay
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">Pay via card, bank transfer, or USSD — instant credit.</p>
+          <div>
+            <Label className="text-xs font-medium text-muted-foreground mb-2 block">Quick amounts</Label>
+            <div className="flex flex-wrap gap-2">
+              {PRESETS.map((p) => (
+                <button key={p} onClick={() => setAmount(String(p))}
+                  className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${amount === String(p) ? "bg-brand-orange text-white border-brand-orange" : "border-border hover:border-brand-orange hover:text-brand-orange"}`}>
+                  ₦{p.toLocaleString()}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <Label htmlFor="ps-amount">Amount (₦)</Label>
+            <Input id="ps-amount" type="number" min="100" placeholder="Enter amount" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1" />
+          </div>
+          <Button onClick={handleOpay} disabled={opayLoading || amt < 100} className="w-full bg-brand-orange hover:bg-brand-orange-hover text-white">
+            {opayLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            Pay ₦{amt > 0 ? amt.toLocaleString() : "—"} with Opay
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-brand-navy flex items-center gap-2 text-base">
+            <CreditCard className="w-5 h-5 text-brand-orange" />Pay with Monnify
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">Alternative card / bank transfer provider.</p>
+          <div>
+            <Label htmlFor="mn-amount">Amount (₦)</Label>
+            <Input id="mn-amount" type="number" min="100" placeholder="Enter amount" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1" />
+          </div>
+          <Button onClick={handleMonnify} disabled={monnifyLoading || amt < 100} variant="outline" className="w-full">
+            {monnifyLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            Pay ₦{amt > 0 ? amt.toLocaleString() : "—"} with Monnify
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-brand-navy flex items-center gap-2 text-base">
+            <Bitcoin className="w-5 h-5 text-brand-orange" />Pay with Crypto
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">Pay with Bitcoin, USDT, or other supported coins via NOWPayments.</p>
+          <div>
+            <Label htmlFor="crypto-amount">Amount (₦)</Label>
+            <Input id="crypto-amount" type="number" min="500" placeholder="Enter amount" value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1" />
+          </div>
+          {!cryptoPending ? (
+            <Button onClick={handleCrypto} disabled={nowLoading || amt < 500} variant="outline" className="w-full">
+              {nowLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Pay ₦{amt > 0 ? amt.toLocaleString() : "—"} with Crypto
+            </Button>
+          ) : (
+            <Button onClick={handleCheckCryptoStatus} disabled={checkingStatus} variant="outline" className="w-full">
+              {checkingStatus && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Check Payment Status
+            </Button>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
