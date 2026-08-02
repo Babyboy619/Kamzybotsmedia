@@ -21,8 +21,15 @@ async function callApi<T>(path: string, body: Record<string, unknown>): Promise<
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: "Request failed" }));
-    throw new Error((data as { error?: string }).error ?? "Request failed");
+    const text = await res.text().catch(() => "");
+    let errorMessage = `Request failed (${res.status}${res.statusText ? ` ${res.statusText}` : ""})`;
+    try {
+      const data = JSON.parse(text) as { error?: string };
+      if (data?.error) errorMessage = data.error;
+    } catch {
+      if (text) errorMessage = text;
+    }
+    throw new Error(errorMessage);
   }
   return res.json() as Promise<T>;
 }

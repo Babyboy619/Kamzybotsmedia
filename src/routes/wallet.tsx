@@ -224,32 +224,41 @@ export default function WalletPage() {
     const userId = searchParams.get("userId");
     if (!ref || !userId || !user) return;
 
-    const tid = toast.loading("Verifying your payment…");
-    void fetch(`/api/payment/verify-neurapay`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reference: ref, userId }),
-    })
-      .then(async (res) => {
+    const verifyPayment = async () => {
+      const tid = toast.loading("Verifying your payment…");
+      const token = await getFreshToken();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      try {
+        const res = await fetch(`/api/payment/verify-neurapay`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ reference: ref, userId }),
+        });
         const payload = await res.json().catch(() => ({}));
         toast.dismiss(tid);
         if (!res.ok) {
-          toast.error(payload.error ?? "Verification failed — contact support");
+          toast.error(payload.error ?? `Verification failed (${res.status})`);
           return;
         }
-        if (payload.alreadyCredited) toast.info("Payment already credited to your wallet.");
-        else
+        if (payload.alreadyCredited) {
+          toast.info("Payment already credited to your wallet.");
+        } else {
           toast.success(
             `₦${Number(payload.amount ?? 0).toLocaleString("en-NG")} added to your wallet!`,
           );
+        }
         fetchData();
-      })
-      .catch((err) => {
+      } catch (err) {
         toast.dismiss(tid);
         toast.error(err instanceof Error ? err.message : "Verification failed — contact support");
-      });
+      }
+    };
+
+    void verifyPayment();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, searchParams]);
 
   useEffect(() => {
     const funded = searchParams.get("funded");

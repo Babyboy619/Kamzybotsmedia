@@ -251,33 +251,47 @@ app.post("/api/payment/verify-neurapay", async (req, res) => {
 
   if (!NEURAPAY_SECRET_KEY) return err(res, 500, "NeuraPay is not configured — contact support");
 
-  let verified = false;
+  const verifyPayload = {
+    reference,
+    amount: Number((intent as Record<string, unknown>).amount ?? 0),
+  };
+  const verifyUrl = `${NEURAPAY_BASE_URL}/v1/transactions/verify`;
+  let verifyRes: Response | null = null;
+  let verifyBody: string | null = null;
+
   try {
-    const verifyRes = await fetch(`${NEURAPAY_BASE_URL}/v1/transactions/verify`, {
+    console.log("[NeuraPay] verify request", { verifyUrl, verifyPayload });
+    verifyRes = await fetch(verifyUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${NEURAPAY_SECRET_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        reference,
-        amount: Number((intent as Record<string, unknown>).amount ?? 0),
-      }),
+      body: JSON.stringify(verifyPayload),
       signal: AbortSignal.timeout(10_000),
     });
-    if (verifyRes.ok) {
-      const payload = (await verifyRes.json().catch(() => null)) as {
-        success?: boolean;
-        status?: string;
-      } | null;
-      verified = payload?.success === true || payload?.status === "success";
-    }
-  } catch {
-    verified = true;
+    verifyBody = await verifyRes.text();
+    console.log("[NeuraPay] verify response status", verifyRes.status);
+    console.log("[NeuraPay] verify response body", verifyBody);
+  } catch (verifyError) {
+    console.error("[NeuraPay] verify request failed", verifyError);
+    return err(res, 502, `NeuraPay verification request failed: ${verifyError instanceof Error ? verifyError.message : String(verifyError)}`);
   }
 
-  if (!verified)
-    return err(res, 400, "Payment not confirmed — contact support if you were charged");
+  let responseJson: Record<string, unknown> | null = null;
+  try {
+    responseJson = JSON.parse(verifyBody ?? "null");
+  } catch (parseError) {
+    console.error("[NeuraPay] failed to parse verify response body", parseError, verifyBody);
+    return err(res, 502, `NeuraPay returned invalid JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+  }
+
+  const success = responseJson?.success === true || responseJson?.status === "success";
+  if (!verifyRes?.ok || !success) {
+    const errorMessage = (responseJson?.error as string) || (responseJson?.message as string) || `NeuraPay verification failed with status ${verifyRes?.status}`;
+    console.error("[NeuraPay] verification failed", { errorMessage, responseJson });
+    return err(res, 400, errorMessage);
+  }
 
   const amount = Number((intent as Record<string, unknown>).amount ?? 0);
   const { error: creditErr } = await supabaseAdmin!.rpc(
