@@ -7,6 +7,13 @@ export async function onRequestPost({ request, env }) {
   const secretKey = env.NEURAPAY_SECRET_KEY || "";
   const baseUrl = env.NEURAPAY_BASE_URL || "";
 
+  console.log("[verify-neurapay] env presence", {
+    supabase: !!supabaseUrl,
+    supabaseServiceKey: !!serviceKey,
+    neurapay_secret: !!secretKey,
+    neurapay_base: !!baseUrl,
+  });
+
   if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
   if (!secretKey || !baseUrl)
     return json({ error: "NeuraPay is not configured — contact admin" }, 500);
