@@ -71,9 +71,7 @@ export async function onRequestPost({ request, env }) {
   const success = responseJson?.success === true || responseJson?.status === "success";
   if (!verifyRes.ok || !success) {
     const errorMessage =
-      (responseJson?.error as string) ||
-      (responseJson?.message as string) ||
-      `NeuraPay verification failed with status ${verifyRes.status}`;
+      String(responseJson?.error ?? responseJson?.message ?? `NeuraPay verification failed with status ${verifyRes.status}`);
     console.error("[NeuraPay verify] failed", { errorMessage, responseJson });
     return json({ error: errorMessage }, 400);
   }
