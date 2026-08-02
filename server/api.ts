@@ -301,17 +301,8 @@ app.post("/api/payment/verify-neurapay", async (req, res) => {
 });
 
 app.post("/api/payment/admin-credit", async (req, res) => {
-  if (!requireSupabase(res)) return;
-  const user = await getAuthUser(req);
-  if (!user) return err(res, 401, "Unauthorized");
-
-  const { data: roles } = await supabaseAdmin!
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", user.id)
-    .eq("role", "admin")
-    .limit(1);
-  if (!roles?.length) return err(res, 403, "Forbidden: admin access required");
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
 
   const { targetUserId, amount, description } = req.body as {
     targetUserId?: string;
@@ -336,7 +327,7 @@ app.post("/api/payment/admin-credit", async (req, res) => {
   if (creditErr) return err(res, 500, (creditErr as { message: string }).message);
 
   await supabaseAdmin!.from("activity_logs").insert({
-    actor_id: user.id,
+    actor_id: adminId,
     action: "admin_credit_wallet",
     target: targetUserId,
     metadata: { amount, description, ref },
@@ -347,32 +338,8 @@ app.post("/api/payment/admin-credit", async (req, res) => {
 
 // New endpoint: Verify manual deposit (admin token or admin role)
 app.post("/api/admin/manual-deposits/verify", async (req, res) => {
-  // Two auth options: Admin role (via supabase token) OR admin API token header
-  const adminHeader = req.header("X-Admin-Token");
-  let isAdmin = false;
-  let adminId: string | null = null;
-
-  if (adminHeader && ADMIN_API_TOKEN && adminHeader === ADMIN_API_TOKEN) {
-    isAdmin = true;
-    adminId = "api-token"; // generic identifier if called with token
-  } else {
-    // Check supabase auth token and role
-    if (!requireSupabase(res)) return;
-    const user = await getAuthUser(req);
-    if (!user) return err(res, 401, "Unauthorized");
-    const { data: roles } = await supabaseAdmin!
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id)
-      .eq("role", "admin")
-      .limit(1);
-    if (roles && roles.length > 0) {
-      isAdmin = true;
-      adminId = user.id;
-    }
-  }
-
-  if (!isAdmin) return err(res, 403, "Forbidden: admin access required");
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
 
   const { reference } = req.body as { reference?: string };
   if (!reference) return err(res, 400, "reference is required");
@@ -501,27 +468,8 @@ app.post("/api/admin/manual-deposits/verify", async (req, res) => {
 
 // ─── Admin: User management APIs ─────────────────────────────────────────────
 app.get("/api/admin/users", async (req, res) => {
-  // Admin token or admin role allowed
-  const adminHeader = req.header("X-Admin-Token");
-  let isAdmin = false;
-  let adminId: string | null = null;
-  if (adminHeader && ADMIN_API_TOKEN && adminHeader === ADMIN_API_TOKEN) {
-    isAdmin = true;
-    adminId = "api-token";
-  } else {
-    if (!requireSupabase(res)) return;
-    const user = await getAuthUser(req);
-    if (!user) return err(res, 401, "Unauthorized");
-    const { data: roles } = await supabaseAdmin!
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id)
-      .eq("role", "admin")
-      .limit(1);
-    if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
-    isAdmin = true;
-    adminId = user.id;
-  }
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
 
   const q = (req.query.q as string) ?? "";
   const suspended = req.query.suspended;
@@ -555,16 +503,8 @@ app.get("/api/admin/users", async (req, res) => {
 });
 
 app.post("/api/admin/users/:id/suspend", async (req, res) => {
-  if (!requireSupabase(res)) return;
-  const user = await getAuthUser(req);
-  if (!user) return err(res, 401, "Unauthorized");
-  const { data: roles } = await supabaseAdmin!
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", user.id)
-    .eq("role", "admin")
-    .limit(1);
-  if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
   const target = req.params.id;
   const { suspended } = req.body as { suspended?: boolean };
   if (suspended === undefined) return err(res, 400, "suspended is required");
@@ -574,7 +514,7 @@ app.post("/api/admin/users/:id/suspend", async (req, res) => {
     .eq("id", target);
   if (error) return err(res, 500, error.message);
   await supabaseAdmin!.from("activity_logs").insert({
-    actor_id: user.id,
+    actor_id: adminId,
     action: suspended ? "suspend_user" : "unsuspend_user",
     target,
     metadata: { suspended },
@@ -583,16 +523,8 @@ app.post("/api/admin/users/:id/suspend", async (req, res) => {
 });
 
 app.post("/api/admin/users/:id/debit", async (req, res) => {
-  if (!requireSupabase(res)) return;
-  const admin = await getAuthUser(req);
-  if (!admin) return err(res, 401, "Unauthorized");
-  const { data: roles } = await supabaseAdmin!
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", admin.id)
-    .eq("role", "admin")
-    .limit(1);
-  if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
   const target = req.params.id;
   const { amount, description } = req.body as { amount?: number; description?: string };
   if (!amount || amount <= 0 || !description)
@@ -627,7 +559,7 @@ app.post("/api/admin/users/:id/debit", async (req, res) => {
     );
     await client.query(
       `INSERT INTO activity_logs (actor_id, action, target, metadata, created_at) VALUES ($1,$2,$3,$4, now())`,
-      [admin.id, "admin_debit", target, JSON.stringify({ amount, description })],
+      [adminId, "admin_debit", target, JSON.stringify({ amount, description })],
     );
     await client.query("COMMIT");
     return res.json({ success: true, newBalance: newBal });
@@ -642,16 +574,8 @@ app.post("/api/admin/users/:id/debit", async (req, res) => {
 
 // ─── Payment: admin-debit (alias for /api/admin/users/:id/debit) ──────────────
 app.post("/api/payment/admin-debit", async (req, res) => {
-  if (!requireSupabase(res)) return;
-  const admin = await getAuthUser(req);
-  if (!admin) return err(res, 401, "Unauthorized");
-  const { data: roles } = await supabaseAdmin!
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", admin.id)
-    .eq("role", "admin")
-    .limit(1);
-  if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
   const { targetUserId, amount, description } = req.body as {
     targetUserId?: string;
     amount?: number;
@@ -689,7 +613,7 @@ app.post("/api/payment/admin-debit", async (req, res) => {
     );
     await client.query(
       `INSERT INTO activity_logs (actor_id, action, target, metadata, created_at) VALUES ($1,$2,$3,$4, now())`,
-      [admin.id, "admin_debit_wallet", targetUserId, JSON.stringify({ amount, description })],
+      [adminId, "admin_debit_wallet", targetUserId, JSON.stringify({ amount, description })],
     );
     await client.query("COMMIT");
     return res.json({ success: true, newBalance: newBal });
@@ -930,16 +854,8 @@ app.post("/api/delivery/assign-credential", async (req, res) => {
 });
 
 app.post("/api/delivery/admin-redispense", async (req, res) => {
-  if (!requireSupabase(res)) return;
-  const admin = await getAuthUser(req);
-  if (!admin) return err(res, 401, "Unauthorized");
-  const { data: roles } = await supabaseAdmin!
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", admin.id)
-    .eq("role", "admin")
-    .limit(1);
-  if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
   const { orderId, productId } = req.body as { orderId?: string; productId?: string };
   if (!orderId || !productId) return err(res, 400, "orderId and productId are required");
 
@@ -970,7 +886,7 @@ app.post("/api/delivery/admin-redispense", async (req, res) => {
     );
     await client.query(
       `INSERT INTO activity_logs (actor_id, action, target, metadata, created_at) VALUES ($1,'admin_redispense_credential',$2,$3,now())`,
-      [admin.id, orderId, JSON.stringify({ productId, credentialId: cred.id })],
+      [adminId, orderId, JSON.stringify({ productId, credentialId: cred.id })],
     );
     await client.query("COMMIT");
     return res.json({ assigned: true, content: cred.content, label: cred.label ?? null });
@@ -985,6 +901,11 @@ app.post("/api/delivery/admin-redispense", async (req, res) => {
 
 // ─── Products CRUD ────────────────────────────────────────────────────────────
 async function requireAdmin(req: express.Request, res: express.Response): Promise<string | null> {
+  const adminHeader = req.header("X-Admin-Token");
+  if (adminHeader && ADMIN_API_TOKEN && adminHeader === ADMIN_API_TOKEN) {
+    return "api-token";
+  }
+
   if (!requireSupabase(res)) return null;
   const user = await getAuthUser(req);
   if (!user) {
@@ -1073,27 +994,8 @@ app.delete("/api/categories/:id", async (req, res) => {
 
 // ─── Notifications APIs ─────────────────────────────────────────────────────
 app.post("/api/admin/notifications/send", async (req, res) => {
-  // Admin only
-  const adminHeader = req.header("X-Admin-Token");
-  let isAdmin = false;
-  let adminId: string | null = null;
-  if (adminHeader && ADMIN_API_TOKEN && adminHeader === ADMIN_API_TOKEN) {
-    isAdmin = true;
-    adminId = "api-token";
-  } else {
-    if (!requireSupabase(res)) return;
-    const user = await getAuthUser(req);
-    if (!user) return err(res, 401, "Unauthorized");
-    const { data: roles } = await supabaseAdmin!
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id)
-      .eq("role", "admin")
-      .limit(1);
-    if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
-    isAdmin = true;
-    adminId = user.id;
-  }
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
 
   const { title, message, userIds } = req.body as {
     title?: string;
