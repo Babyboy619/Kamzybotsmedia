@@ -8,9 +8,17 @@ export async function onRequestPost({ request, env }) {
   const secretKey = env.NEURAPAY_SECRET_KEY || "";
   const baseUrl = env.NEURAPAY_BASE_URL || "";
 
+  console.log("[init-neurapay] env presence", {
+    supabase: !!supabaseUrl,
+    supabaseServiceKey: !!serviceKey,
+    neurapay_public: !!publicKey,
+    neurapay_secret: !!secretKey,
+    neurapay_base: !!baseUrl,
+  });
+
   if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
-  if (!publicKey || !secretKey || !baseUrl)
-    return json({ error: "NeuraPay is not configured — contact admin" }, 500);
+  // This endpoint only needs the public key to return to the client.
+  if (!publicKey) return json({ error: "NeuraPay is not configured — contact admin" }, 500);
 
   const auth = request.headers.get("Authorization") || "";
   if (!auth.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
