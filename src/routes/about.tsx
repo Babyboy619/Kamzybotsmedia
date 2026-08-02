@@ -3,12 +3,36 @@ import { Check, Shield, Users, Zap, Target, Clock } from "lucide-react";
 import { PageHero } from "@/components/sections/PageHero";
 
 const benefits = [
-  { icon: Shield, title: "Verified Accounts", description: "Every account is thoroughly authenticated before listing." },
-  { icon: Users, title: "Trusted Community", description: "Join thousands of satisfied customers across the world." },
-  { icon: Zap, title: "Instant Delivery", description: "Get immediate access via our streamlined transfer process." },
-  { icon: Target, title: "Targeted Audience", description: "Match accounts to your niche and target demographics." },
-  { icon: Clock, title: "24/7 Support", description: "Our team is available around the clock to assist you." },
-  { icon: Check, title: "Secure Transactions", description: "Safe escrow-style handovers protect every purchase." },
+  {
+    icon: Shield,
+    title: "Verified Accounts",
+    description: "Every account is thoroughly authenticated before listing.",
+  },
+  {
+    icon: Users,
+    title: "Trusted Community",
+    description: "Join thousands of satisfied customers across the world.",
+  },
+  {
+    icon: Zap,
+    title: "Instant Delivery",
+    description: "Get immediate access via our streamlined transfer process.",
+  },
+  {
+    icon: Target,
+    title: "Targeted Audience",
+    description: "Match accounts to your niche and target demographics.",
+  },
+  {
+    icon: Clock,
+    title: "24/7 Support",
+    description: "Our team is available around the clock to assist you.",
+  },
+  {
+    icon: Check,
+    title: "Secure Transactions",
+    description: "Safe escrow-style handovers protect every purchase.",
+  },
 ];
 
 const features = [
@@ -40,7 +64,11 @@ export default function AboutPage() {
               className="relative"
             >
               <div className="relative rounded-3xl overflow-hidden shadow-2xl">
-                    <img src="/images/about-promo.svg" alt="Kamzybot's Media" className="w-full h-auto object-cover" />
+                <img
+                  src="/images/about-promo.svg"
+                  alt="Kamzybot's Media"
+                  className="w-full h-auto object-cover"
+                />
               </div>
               <div className="absolute -bottom-6 -right-6 w-32 h-32 bg-brand-orange/15 rounded-full -z-10" />
               <div className="absolute -top-6 -left-6 w-24 h-24 bg-brand-navy/10 rounded-full -z-10" />
@@ -57,10 +85,15 @@ export default function AboutPage() {
                 Unlock the power of professional digital solutions and social media growth.
               </h2>
               <p className="text-muted-foreground leading-relaxed">
-                Social media is essential for individuals, businesses, and influencers alike. Growing your presence organically takes time — Kamzybot's Media provides expert creative services, strategic guidance, and proven solutions to accelerate your success.
+                Social media is essential for individuals, businesses, and influencers alike.
+                Growing your presence organically takes time — Kamzybot's Media provides expert
+                creative services, strategic guidance, and proven solutions to accelerate your
+                success.
               </p>
               <p className="text-muted-foreground leading-relaxed">
-                We offer comprehensive digital solutions across all major platforms, with transparency, authentic engagement strategies, and dedicated support at every step of your growth journey.
+                We offer comprehensive digital solutions across all major platforms, with
+                transparency, authentic engagement strategies, and dedicated support at every step
+                of your growth journey.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
@@ -87,8 +120,12 @@ export default function AboutPage() {
             transition={{ duration: 0.5 }}
             className="text-center mb-12"
           >
-            <h2 className="text-3xl md:text-4xl font-bold text-brand-navy mb-3 tracking-tight">Why choose us</h2>
-            <p className="text-muted-foreground max-w-2xl mx-auto">A complete solution for your social media account needs.</p>
+            <h2 className="text-3xl md:text-4xl font-bold text-brand-navy mb-3 tracking-tight">
+              Why choose us
+            </h2>
+            <p className="text-muted-foreground max-w-2xl mx-auto">
+              A complete solution for your social media account needs.
+            </p>
           </motion.div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

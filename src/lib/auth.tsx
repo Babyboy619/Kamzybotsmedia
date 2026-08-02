@@ -52,7 +52,7 @@ async function provisionWalletBackground(session: Session): Promise<void> {
       return;
     }
 
-    const err = await res.json().catch(() => ({})) as { error?: string };
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
     console.warn("[Auth] Background wallet provision returned", res.status, err.error);
 
     // API unavailable — try SECURITY DEFINER RPC directly (always works when DB is reachable)
@@ -93,9 +93,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Also check suspension and refresh role
         (async () => {
           try {
-            const { data: profile } = await supabase.from("profiles").select("suspended").eq("id", s.user.id).single();
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("suspended")
+              .eq("id", s.user.id)
+              .single();
             if (profile?.suspended) {
-              try { await supabase.auth.signOut(); } catch { /* ignore */ }
+              try {
+                await supabase.auth.signOut();
+              } catch {
+                /* ignore */
+              }
               toast.error("Your account has been suspended. Contact support.");
               return;
             }
@@ -103,43 +111,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // ignore
           }
           if (!mounted) return;
-          fetchRole(s.user.id).then((r) => { if (mounted) setRole(r); });
+          fetchRole(s.user.id).then((r) => {
+            if (mounted) setRole(r);
+          });
         })();
       } else {
         setRole(null);
       }
     });
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
-      if (data.session?.user) {
-        // Check suspension status on initial session
-        (async () => {
-          try {
-            const { data: profile } = await supabase.from("profiles").select("suspended").eq("id", data.session!.user.id).single();
-            if (profile?.suspended) {
-              try { await supabase.auth.signOut(); } catch { /* ignore */ }
-              toast.error("Your account has been suspended. Contact support.");
-              setLoading(false);
-              return;
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!mounted) return;
+        setSession(data.session);
+        setUser(data.session?.user ?? null);
+        if (data.session?.user) {
+          // Check suspension status on initial session
+          (async () => {
+            try {
+              const { data: profile } = await supabase
+                .from("profiles")
+                .select("suspended")
+                .eq("id", data.session!.user.id)
+                .single();
+              if (profile?.suspended) {
+                try {
+                  await supabase.auth.signOut();
+                } catch {
+                  /* ignore */
+                }
+                toast.error("Your account has been suspended. Contact support.");
+                setLoading(false);
+                return;
+              }
+            } catch {
+              // ignore
             }
-          } catch {
-            // ignore
-          }
-          fetchRole(data.session!.user.id).then((r) => {
-            if (!mounted) return;
-            setRole(r);
-            setLoading(false);
-          });
-        })();
-      } else {
-        setLoading(false);
-      }
-    }).catch(() => {
-      if (mounted) setLoading(false);
-    });
+            fetchRole(data.session!.user.id).then((r) => {
+              if (!mounted) return;
+              setRole(r);
+              setLoading(false);
+            });
+          })();
+        } else {
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (mounted) setLoading(false);
+      });
 
     return () => {
       mounted = false;
@@ -156,7 +177,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     configured,
     signOut: async () => {
       if (!configured) return;
-      try { await supabase.auth.signOut(); } catch { /* ignore */ }
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        /* ignore */
+      }
     },
     refreshRole: async () => {
       if (user) setRole(await fetchRole(user.id));

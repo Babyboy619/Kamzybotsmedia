@@ -3,14 +3,13 @@
 // Docs: https://documentation.opaycheckout.com/cashier-create
 
 export async function onRequestPost({ request, env }) {
-  const supabaseUrl  = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
-  const serviceKey   = env.SUPABASE_SERVICE_ROLE_KEY || "";
-  const merchantId   = env.OPAY_MERCHANT_ID || "";
-  const publicKey    = env.OPAY_PUBLIC_KEY || "";
-  const baseUrl       = env.OPAY_BASE_URL || "https://liveapi.opaycheckout.com";
+  const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const merchantId = env.OPAY_MERCHANT_ID || "";
+  const publicKey = env.OPAY_PUBLIC_KEY || "";
+  const baseUrl = env.OPAY_BASE_URL || "https://liveapi.opaycheckout.com";
 
-  if (!supabaseUrl || !serviceKey)
-    return json({ error: "Server not configured" }, 503);
+  if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
   if (!merchantId || !publicKey)
     return json({ error: "Opay is not configured — contact admin" }, 500);
 
@@ -24,8 +23,7 @@ export async function onRequestPost({ request, env }) {
 
   if (!amount || !userId || !reference)
     return json({ error: "amount, userId and reference are required" }, 400);
-  if (userId !== user.id)
-    return json({ error: "Forbidden" }, 403);
+  if (userId !== user.id) return json({ error: "Forbidden" }, 403);
 
   const siteUrl = env.VITE_SITE_URL || "https://sammystore.pages.dev";
 
@@ -61,14 +59,16 @@ export async function onRequestPost({ request, env }) {
 
   if (!initRes.ok || initData.code !== "00000") {
     console.error("[init-opay] init error:", initData);
-    return json({ error: initData.message || "Could not initialize Opay payment — try again" }, 502);
+    return json(
+      { error: initData.message || "Could not initialize Opay payment — try again" },
+      502,
+    );
   }
 
   const cashierUrl = initData?.data?.cashierUrl;
-  const orderNo    = initData?.data?.orderNo;
+  const orderNo = initData?.data?.orderNo;
 
-  if (!cashierUrl)
-    return json({ error: "Opay did not return a checkout URL" }, 502);
+  if (!cashierUrl) return json({ error: "Opay did not return a checkout URL" }, 502);
 
   await sbFetch(supabaseUrl, serviceKey, "/rest/v1/payment_intents", {
     method: "POST",

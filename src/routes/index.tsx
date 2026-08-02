@@ -41,8 +41,7 @@ export default function HomePage() {
               transition={{ duration: 0.6, delay: 0.1 }}
               className="mt-5 text-4xl md:text-5xl lg:text-6xl font-bold text-brand-navy leading-[1.1] tracking-tight"
             >
-              Social media growth,{" "}
-              <span className="text-brand-orange">made easy.</span>
+              Social media growth, <span className="text-brand-orange">made easy.</span>
             </motion.h1>
 
             <motion.p
@@ -51,7 +50,9 @@ export default function HomePage() {
               transition={{ duration: 0.6, delay: 0.2 }}
               className="mt-6 text-muted-foreground text-base md:text-lg leading-relaxed max-w-3xl mx-auto"
             >
-              Discover professional digital solutions and creative services for growing your social media presence. Expert strategies tailored for Instagram, TikTok, Facebook, YouTube, and more.
+              Discover professional digital solutions and creative services for growing your social
+              media presence. Expert strategies tailored for Instagram, TikTok, Facebook, YouTube,
+              and more.
             </motion.p>
 
             <motion.div
@@ -62,7 +63,10 @@ export default function HomePage() {
             >
               {categories.slice(0, 5).map((category, idx) => (
                 <span key={category.id} className="flex items-center text-sm">
-                  <Link to={`/products?cat=${category.slug}`} className="text-muted-foreground hover:text-brand-orange transition-colors">
+                  <Link
+                    to={`/products?cat=${category.slug}`}
+                    className="text-muted-foreground hover:text-brand-orange transition-colors"
+                  >
                     {category.name}
                   </Link>
                   {idx < 4 && <span className="text-border ml-5">|</span>}
@@ -124,7 +128,11 @@ export default function HomePage() {
               transition={{ duration: 0.6 }}
             >
               <div className="relative rounded-3xl overflow-hidden shadow-2xl">
-                <img src="/images/about-promo.svg" alt="Kamzybot's Media" className="w-full h-auto object-cover" />
+                <img
+                  src="/images/about-promo.svg"
+                  alt="Kamzybot's Media"
+                  className="w-full h-auto object-cover"
+                />
               </div>
               <div className="absolute -bottom-6 -right-6 w-32 h-32 bg-brand-orange/15 rounded-full -z-10" />
               <div className="absolute -top-6 -left-6 w-24 h-24 bg-brand-navy/10 rounded-full -z-10" />
@@ -139,15 +147,16 @@ export default function HomePage() {
             >
               <div className="flex items-center gap-4">
                 <div className="w-10 h-0.5 bg-brand-orange" />
-                <span className="text-brand-orange font-medium uppercase tracking-wider text-sm">About Us</span>
+                <span className="text-brand-orange font-medium uppercase tracking-wider text-sm">
+                  About Us
+                </span>
               </div>
               <h2 className="text-3xl md:text-4xl font-bold text-brand-navy leading-tight tracking-tight">
                 Unlock the power of an established social media presence.
               </h2>
               <p className="text-muted-foreground leading-relaxed">
-                Building a strong following from scratch takes years. Kamzybot's Media
-                gives you a secure, seamless way to acquire verified
-                accounts and accelerate your social growth.
+                Building a strong following from scratch takes years. Kamzybot's Media gives you a
+                secure, seamless way to acquire verified accounts and accelerate your social growth.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                 {features.map((feature) => (
@@ -160,7 +169,11 @@ export default function HomePage() {
                 ))}
               </div>
               <div className="pt-2">
-                <Button asChild variant="link" className="text-brand-orange hover:text-brand-orange-hover p-0 h-auto font-semibold">
+                <Button
+                  asChild
+                  variant="link"
+                  className="text-brand-orange hover:text-brand-orange-hover p-0 h-auto font-semibold"
+                >
                   <Link to="/about" className="inline-flex items-center gap-2">
                     Learn more about us <ArrowRight className="w-4 h-4" />
                   </Link>
@@ -182,7 +195,9 @@ export default function HomePage() {
           >
             <div className="flex items-center justify-center gap-4 mb-3">
               <div className="w-10 h-0.5 bg-brand-orange" />
-              <span className="text-brand-orange font-medium uppercase tracking-wider text-sm">Testimonials</span>
+              <span className="text-brand-orange font-medium uppercase tracking-wider text-sm">
+                Testimonials
+              </span>
               <div className="w-10 h-0.5 bg-brand-orange" />
             </div>
             <h2 className="text-3xl md:text-4xl font-bold text-brand-navy tracking-tight">
@@ -204,7 +219,11 @@ export default function HomePage() {
                 <div className="text-brand-orange text-3xl leading-none mb-3">"</div>
                 <p className="text-muted-foreground text-sm leading-relaxed mb-6">{t.content}</p>
                 <div className="flex items-center gap-3 pt-4 border-t border-border">
-                  <img src={t.avatar} alt={t.name} className="w-12 h-12 rounded-full object-cover" />
+                  <img
+                    src={t.avatar}
+                    alt={t.name}
+                    className="w-12 h-12 rounded-full object-cover"
+                  />
                   <div>
                     <h4 className="font-semibold text-brand-navy">{t.name}</h4>
                     <p className="text-xs text-muted-foreground">{t.role}</p>

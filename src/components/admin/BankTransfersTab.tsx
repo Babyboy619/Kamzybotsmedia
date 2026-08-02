@@ -32,11 +32,13 @@ export function BankTransfersTab() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchTransfers(); }, [filter]);
+  useEffect(() => {
+    fetchTransfers();
+  }, [filter]);
 
   const approve = async (id: string) => {
     setProcessing(id);
-    const { error } = await (supabase.rpc as any)("approve_bank_transfer_request", {
+    const { error } = await supabase.rpc("approve_bank_transfer_request", {
       _request_id: id,
       _admin_note: "Approved by admin",
     });
@@ -49,7 +51,7 @@ export function BankTransfersTab() {
   const reject = async (id: string) => {
     const reason = prompt("Reason for rejection (optional):");
     setProcessing(id);
-    const { error } = await (supabase.rpc as any)("reject_bank_transfer_request", {
+    const { error } = await supabase.rpc("reject_bank_transfer_request", {
       _request_id: id,
       _reason: reason ?? "Rejected by admin",
     });
@@ -59,7 +61,7 @@ export function BankTransfersTab() {
     fetchTransfers();
   };
 
-  const pendingCount = transfers.filter(t => t.status === "pending").length;
+  const pendingCount = transfers.filter((t) => t.status === "pending").length;
 
   return (
     <div className="space-y-4">
@@ -73,7 +75,7 @@ export function BankTransfersTab() {
           )}
         </h2>
         <div className="flex gap-1">
-          {(["pending","approved","rejected","all"] as const).map(f => (
+          {(["pending", "approved", "rejected", "all"] as const).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -99,33 +101,33 @@ export function BankTransfersTab() {
         </div>
       ) : (
         <div className="space-y-3">
-          {transfers.map(t => (
+          {transfers.map((t) => (
             <div
               key={t.id}
               className={`rounded-xl border p-4 space-y-3 ${
                 t.status === "pending"
                   ? "border-orange-200 bg-orange-50"
                   : t.status === "approved"
-                  ? "border-green-200 bg-green-50"
-                  : "border-red-200 bg-red-50"
+                    ? "border-green-200 bg-green-50"
+                    : "border-red-200 bg-red-50"
               }`}
             >
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <div className="font-semibold text-sm">
-                    ₦{t.amount.toLocaleString()}
-                  </div>
+                  <div className="font-semibold text-sm">₦{t.amount.toLocaleString()}</div>
                   <div className="text-xs text-muted-foreground">
                     {t.profiles?.email ?? t.user_id.slice(-8)}
                   </div>
                 </div>
-                <span className={`text-xs font-bold px-2 py-0.5 rounded-full capitalize ${
-                  t.status === "pending"
-                    ? "bg-orange-200 text-orange-800"
-                    : t.status === "approved"
-                    ? "bg-green-200 text-green-800"
-                    : "bg-red-200 text-red-800"
-                }`}>
+                <span
+                  className={`text-xs font-bold px-2 py-0.5 rounded-full capitalize ${
+                    t.status === "pending"
+                      ? "bg-orange-200 text-orange-800"
+                      : t.status === "approved"
+                        ? "bg-green-200 text-green-800"
+                        : "bg-red-200 text-red-800"
+                  }`}
+                >
                   {t.status}
                 </span>
               </div>
@@ -139,7 +141,10 @@ export function BankTransfersTab() {
                   <span className="text-muted-foreground">Date</span>
                   <div className="font-medium">
                     {new Date(t.created_at).toLocaleDateString("en-NG", {
-                      day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"
+                      day: "numeric",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
                     })}
                   </div>
                 </div>

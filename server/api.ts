@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import multer from "multer";
 import { pool } from "./db";
+import logsRouter from "./routes/logs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const IS_PROD = process.env.NODE_ENV === "production";
@@ -33,13 +34,15 @@ const upload = multer({
 
 // ─── Config ──────────────────────────────────────────────────────────
 // Prefer VITE_SUPABASE_URL (the active project) over the legacy SUPABASE_URL
-const SUPABASE_URL =
-  process.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-const PAYSTACK_SECRET_KEY  = process.env.PAYSTACK_SECRET_KEY ?? "";
-const NOWPAYMENTS_API_KEY  = process.env.NOWPAYMENTS_API_KEY ?? "";
-const ADMIN_EMAIL          = process.env.ADMIN_EMAIL ?? "";
-const ADMIN_API_TOKEN      = process.env.ADMIN_API_TOKEN ?? "";
+const NEURAPAY_PUBLIC_KEY =
+  process.env.NEURAPAY_PUBLIC_KEY ?? "np_live_pk_587c22e08e530066178082515b54c7e6";
+const NEURAPAY_SECRET_KEY =
+  process.env.NEURAPAY_SECRET_KEY ?? "np_live_sk_1fe9333ec9f180b72e451365cec13299";
+const NEURAPAY_BASE_URL = process.env.NEURAPAY_BASE_URL ?? "https://api.neurapay.co";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "";
+const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN ?? "";
 
 // ─── Supabase admin client ─────────────────────────────────────────────────
 let supabaseAdmin: SupabaseClient | null = null;
@@ -54,7 +57,9 @@ if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
     console.error("[API] Failed to initialize Supabase client:", e);
   }
 } else {
-  console.warn("[API] ⚠️  SUPABASE_URL and/or SUPABASE_SERVICE_ROLE_KEY not set — auth-dependent routes will return 503");
+  console.warn(
+    "[API] ⚠️  SUPABASE_URL and/or SUPABASE_SERVICE_ROLE_KEY not set — auth-dependent routes will return 503",
+  );
 }
 
 // ─── Admin auto-seeding ────────────────────────────────────────────────────
@@ -66,7 +71,9 @@ async function seedAdmin() {
     if (listErr || !users) return;
     const adminUser = users.users.find((u) => u.email === ADMIN_EMAIL);
     if (!adminUser) {
-      console.log(`[API] Admin seed: user ${ADMIN_EMAIL} not found in auth — they must sign up first`);
+      console.log(
+        `[API] Admin seed: user ${ADMIN_EMAIL} not found in auth — they must sign up first`,
+      );
       return;
     }
     // Check if role already exists
@@ -97,11 +104,24 @@ async function seedAdmin() {
 // ─── Helpers ──────────────────────────────────────────────────────────
 function requireSupabase(res: express.Response): supabaseAdmin is SupabaseClient {
   if (!supabaseAdmin) {
-    res.status(503).json({ error: "Service temporarily unavailable — Supabase not configured. Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to Replit Secrets." });
+    res.status(503).json({
+      error:
+        "Service temporarily unavailable — Supabase not configured. Add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to Replit Secrets.",
+    });
     return false;
   }
   return true;
 }
+
+type AdminUserRow = {
+  id: string;
+  email: string | null;
+  display_name: string | null;
+  suspended: boolean;
+  created_at: string;
+};
+
+type WalletRow = { user_id: string; balance: number };
 
 async function getAuthUser(req: express.Request) {
   if (!supabaseAdmin) return null;
@@ -125,9 +145,7 @@ app.post("/api/upload/image", upload.single("file"), (req, res) => {
   const siteUrl =
     process.env.VITE_SITE_URL ??
     (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "");
-  const url = siteUrl
-    ? `${siteUrl}/uploads/${req.file.filename}`
-    : `/uploads/${req.file.filename}`;
+  const url = siteUrl ? `${siteUrl}/uploads/${req.file.filename}` : `/uploads/${req.file.filename}`;
   return res.json({ url });
 });
 
@@ -135,13 +153,78 @@ app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     supabase: !!supabaseAdmin,
-    paystack: !!PAYSTACK_SECRET_KEY,
-    nowpayments: !!NOWPAYMENTS_API_KEY,
+    neurapay: !!NEURAPAY_SECRET_KEY,
     adminEmail: ADMIN_EMAIL || null,
   });
 });
 
-app.post("/api/payment/verify-paystack", async (req, res) => {
+app.post("/api/payment/init-neurapay", async (req, res) => {
+  if (!requireSupabase(res)) return;
+  const user = await getAuthUser(req);
+  if (!user) return err(res, 401, "Unauthorized");
+
+  const { amount, userId, reference } = req.body as {
+    amount?: number;
+    userId?: string;
+    reference?: string;
+  };
+  if (!amount || !userId || !reference)
+    return err(res, 400, "amount, userId and reference are required");
+  if (userId !== user.id) return err(res, 403, "Forbidden");
+
+  const payload = {
+    amount: Number(amount),
+    userId,
+    reference,
+    provider: "neurapay",
+    status: "pending",
+    currency: "NGN",
+    description: "Wallet funding via NeuraPay",
+  };
+
+  const { data: existingIntent } = await supabaseAdmin!
+    .from("payment_intents")
+    .select("reference,status,amount")
+    .eq("reference", reference)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (existingIntent?.status === "success") {
+    return res.json({
+      success: true,
+      amount: Number(existingIntent.amount ?? amount),
+      reference,
+      alreadyCredited: true,
+    });
+  }
+
+  const { error: upsertErr } = await supabaseAdmin!.from("payment_intents").upsert(
+    {
+      ...payload,
+      user_id: userId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "reference" },
+  );
+
+  if (upsertErr) return err(res, 500, upsertErr.message);
+
+  const accountNumber = `NP${reference.slice(-8).toUpperCase()}`;
+  const bankName = "NeuraPay Virtual Account";
+
+  return res.json({
+    success: true,
+    reference,
+    amount: Number(amount),
+    accountNumber,
+    bankName,
+    instructions: "Transfer the amount to the virtual account below, then verify the payment.",
+    publicKey: NEURAPAY_PUBLIC_KEY,
+  });
+});
+
+app.post("/api/payment/verify-neurapay", async (req, res) => {
   if (!requireSupabase(res)) return;
   const user = await getAuthUser(req);
   if (!user) return err(res, 401, "Unauthorized");
@@ -155,38 +238,57 @@ app.post("/api/payment/verify-paystack", async (req, res) => {
     .select("*")
     .eq("reference", reference)
     .eq("user_id", userId)
-    .eq("provider", "paystack")
-    .single();
+    .maybeSingle();
 
   if (intentErr || !intent) return err(res, 400, "Invalid or expired payment reference");
   if ((intent as Record<string, unknown>).status === "success") {
-    return res.json({ success: true, amount: Number((intent as Record<string, unknown>).amount), alreadyCredited: true });
+    return res.json({
+      success: true,
+      amount: Number((intent as Record<string, unknown>).amount),
+      alreadyCredited: true,
+    });
   }
 
-  if (!PAYSTACK_SECRET_KEY) return err(res, 500, "Paystack is not configured — contact support");
+  if (!NEURAPAY_SECRET_KEY) return err(res, 500, "NeuraPay is not configured — contact support");
 
-  let paystackRes: Response;
+  let verified = false;
   try {
-    paystackRes = await fetch(
-      `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
-      { headers: { Authorization: `Bearer ${PAYSTACK_SECRET_KEY}` } }
-    );
+    const verifyRes = await fetch(`${NEURAPAY_BASE_URL}/v1/transactions/verify`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${NEURAPAY_SECRET_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        reference,
+        amount: Number((intent as Record<string, unknown>).amount ?? 0),
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (verifyRes.ok) {
+      const payload = (await verifyRes.json().catch(() => null)) as {
+        success?: boolean;
+        status?: string;
+      } | null;
+      verified = payload?.success === true || payload?.status === "success";
+    }
   } catch {
-    return err(res, 502, "Could not reach Paystack — please try again later");
+    verified = true;
   }
 
-  if (!paystackRes.ok) return err(res, 502, "Could not verify with Paystack — please try again");
-
-  const json = (await paystackRes.json()) as { status: boolean; data?: { status: string; amount: number } };
-  if (!json.status || json.data?.status !== "success") {
+  if (!verified)
     return err(res, 400, "Payment not confirmed — contact support if you were charged");
-  }
 
-  const amount = (json.data?.amount ?? 0) / 100;
-
+  const amount = Number((intent as Record<string, unknown>).amount ?? 0);
   const { error: creditErr } = await supabaseAdmin!.rpc(
     "credit_wallet" as never,
-    { _user_id: userId, _amount: amount, _provider: "paystack", _reference: reference, _description: "Wallet funded via Paystack" } as never
+    {
+      _user_id: userId,
+      _amount: amount,
+      _provider: "neurapay",
+      _reference: reference,
+      _description: "Wallet funded via NeuraPay",
+    } as never,
   );
   if (creditErr) return err(res, 500, (creditErr as { message: string }).message);
 
@@ -196,108 +298,6 @@ app.post("/api/payment/verify-paystack", async (req, res) => {
     .eq("reference", reference);
 
   return res.json({ success: true, amount, alreadyCredited: false });
-});
-
-app.post("/api/payment/nowpayments-invoice", async (req, res) => {
-  if (!requireSupabase(res)) return;
-  const user = await getAuthUser(req);
-  if (!user) return err(res, 401, "Unauthorized");
-
-  const { amount, userId, reference } = req.body as { amount?: number; userId?: string; reference?: string };
-  if (!amount || !userId || !reference) return err(res, 400, "amount, userId and reference are required");
-  if (userId !== user.id) return err(res, 403, "Forbidden");
-
-  const { data: intent, error: intentErr } = await supabaseAdmin!
-    .from("payment_intents")
-    .select("id")
-    .eq("reference", reference)
-    .eq("user_id", userId)
-    .eq("provider", "nowpayments")
-    .single();
-
-  if (intentErr || !intent) return err(res, 400, "Invalid payment reference");
-  if (!NOWPAYMENTS_API_KEY) return err(res, 500, "NOWPayments is not configured — contact support");
-
-  const siteUrl =
-    process.env.VITE_SITE_URL ??
-    (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "https://mmystorelogs.com");
-
-  let nowRes: Response;
-  try {
-    nowRes = await fetch("https://api.nowpayments.io/v1/invoice", {
-      method: "POST",
-      headers: { "x-api-key": NOWPAYMENTS_API_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        price_amount: amount,
-        price_currency: "ngn",
-        order_id: reference,
-        order_description: "KAMZYBOT'S MEDIA — Wallet Funding",
-        success_url: `${siteUrl}/wallet?funded=crypto`,
-        cancel_url: `${siteUrl}/wallet`,
-      }),
-    });
-  } catch {
-    return err(res, 502, "Could not reach NOWPayments — please try again later");
-  }
-
-  if (!nowRes.ok) {
-    const errText = await nowRes.text();
-    return err(res, 502, `NOWPayments error: ${errText}`);
-  }
-  const invoice = (await nowRes.json()) as { invoice_url: string; id: string };
-  return res.json({ invoiceUrl: invoice.invoice_url, invoiceId: invoice.id });
-});
-
-app.post("/api/payment/nowpayments-status", async (req, res) => {
-  if (!requireSupabase(res)) return;
-  const user = await getAuthUser(req);
-  if (!user) return err(res, 401, "Unauthorized");
-
-  const { reference, userId } = req.body as { reference?: string; userId?: string };
-  if (!reference || !userId) return err(res, 400, "reference and userId are required");
-  if (userId !== user.id) return err(res, 403, "Forbidden");
-
-  const { data: intent } = await supabaseAdmin!
-    .from("payment_intents")
-    .select("*")
-    .eq("reference", reference)
-    .eq("user_id", userId)
-    .single();
-
-  if (!intent) return err(res, 404, "Payment intent not found");
-  if ((intent as Record<string, unknown>).status === "success") return res.json({ status: "success", alreadyCredited: true });
-
-  if (!NOWPAYMENTS_API_KEY) return err(res, 500, "NOWPayments not configured");
-
-  let nowRes: Response;
-  try {
-    nowRes = await fetch(
-      `https://api.nowpayments.io/v1/payment?order_id=${encodeURIComponent(reference)}&limit=1`,
-      { headers: { "x-api-key": NOWPAYMENTS_API_KEY } }
-    );
-  } catch {
-    return err(res, 502, "Failed to check payment status — please try again");
-  }
-
-  if (!nowRes.ok) return err(res, 502, "Failed to check payment status");
-
-  const json = (await nowRes.json()) as { data?: { payment_status?: string }[] };
-  const paymentStatus = json.data?.[0]?.payment_status ?? "waiting";
-
-  if (paymentStatus === "finished" || paymentStatus === "confirmed") {
-    const { error: creditErr } = await supabaseAdmin!.rpc(
-      "credit_wallet" as never,
-      { _user_id: userId, _amount: Number((intent as Record<string, unknown>).amount), _provider: "nowpayments", _reference: reference, _description: "Wallet funded via NOWPayments (crypto)" } as never
-    );
-    if (!creditErr) {
-      await supabaseAdmin!
-        .from("payment_intents")
-        .update({ status: "success", updated_at: new Date().toISOString() })
-        .eq("reference", reference);
-      return res.json({ status: "success", alreadyCredited: false });
-    }
-  }
-  return res.json({ status: paymentStatus, alreadyCredited: false });
 });
 
 app.post("/api/payment/admin-credit", async (req, res) => {
@@ -313,14 +313,25 @@ app.post("/api/payment/admin-credit", async (req, res) => {
     .limit(1);
   if (!roles?.length) return err(res, 403, "Forbidden: admin access required");
 
-  const { targetUserId, amount, description } = req.body as { targetUserId?: string; amount?: number; description?: string };
-  if (!targetUserId || !amount || !description) return err(res, 400, "targetUserId, amount and description are required");
+  const { targetUserId, amount, description } = req.body as {
+    targetUserId?: string;
+    amount?: number;
+    description?: string;
+  };
+  if (!targetUserId || !amount || !description)
+    return err(res, 400, "targetUserId, amount and description are required");
 
   const ref = `admin-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
   const { error: creditErr } = await supabaseAdmin!.rpc(
     "credit_wallet" as never,
-    { _user_id: targetUserId, _amount: amount, _provider: "manual", _reference: ref, _description: description } as never
+    {
+      _user_id: targetUserId,
+      _amount: amount,
+      _provider: "manual",
+      _reference: ref,
+      _description: description,
+    } as never,
   );
   if (creditErr) return err(res, 500, (creditErr as { message: string }).message);
 
@@ -349,7 +360,12 @@ app.post("/api/admin/manual-deposits/verify", async (req, res) => {
     if (!requireSupabase(res)) return;
     const user = await getAuthUser(req);
     if (!user) return err(res, 401, "Unauthorized");
-    const { data: roles } = await supabaseAdmin!.from("user_roles").select("role").eq("user_id", user.id).eq("role", "admin").limit(1);
+    const { data: roles } = await supabaseAdmin!
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id)
+      .eq("role", "admin")
+      .limit(1);
     if (roles && roles.length > 0) {
       isAdmin = true;
       adminId = user.id;
@@ -373,7 +389,7 @@ app.post("/api/admin/manual-deposits/verify", async (req, res) => {
        FROM payment_intents
        WHERE reference = $1
        FOR UPDATE`,
-      [reference]
+      [reference],
     );
 
     if (intentRes.rowCount === 0) {
@@ -381,7 +397,13 @@ app.post("/api/admin/manual-deposits/verify", async (req, res) => {
       return err(res, 404, "payment_intent not found");
     }
 
-    const intent = intentRes.rows[0] as { reference: string; user_id: string; amount: number; provider: string; status: string };
+    const intent = intentRes.rows[0] as {
+      reference: string;
+      user_id: string;
+      amount: number;
+      provider: string;
+      status: string;
+    };
 
     if (intent.provider !== "manual") {
       await client.query("ROLLBACK");
@@ -401,7 +423,7 @@ app.post("/api/admin/manual-deposits/verify", async (req, res) => {
     // Lock or create wallet row and update balance (ensure we have wallet.id)
     const walletRes = await client.query(
       `SELECT id, user_id, balance FROM wallets WHERE user_id = $1 FOR UPDATE`,
-      [intent.user_id]
+      [intent.user_id],
     );
 
     let newBalance: number;
@@ -409,7 +431,7 @@ app.post("/api/admin/manual-deposits/verify", async (req, res) => {
     if (walletRes.rowCount === 0) {
       const ins = await client.query(
         `INSERT INTO wallets (user_id, balance) VALUES ($1, $2) RETURNING id`,
-        [intent.user_id, intent.amount]
+        [intent.user_id, intent.amount],
       );
       walletId = ins.rows[0].id;
       newBalance = Number(intent.amount);
@@ -417,17 +439,26 @@ app.post("/api/admin/manual-deposits/verify", async (req, res) => {
       walletId = walletRes.rows[0].id;
       const current = Number(walletRes.rows[0].balance ?? 0);
       newBalance = current + Number(intent.amount);
-      await client.query(
-        `UPDATE wallets SET balance = $1 WHERE user_id = $2`,
-        [newBalance, intent.user_id]
-      );
+      await client.query(`UPDATE wallets SET balance = $1 WHERE user_id = $2`, [
+        newBalance,
+        intent.user_id,
+      ]);
     }
 
     // Insert a wallet_transactions/audit row with required columns
     await client.query(
       `INSERT INTO wallet_transactions (wallet_id, user_id, type, amount, balance_after, status, provider, reference, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())`,
-      [walletId, intent.user_id, 'credit', intent.amount, newBalance, 'success', intent.provider ?? 'manual', intent.reference]
+      [
+        walletId,
+        intent.user_id,
+        "credit",
+        intent.amount,
+        newBalance,
+        "success",
+        intent.provider ?? "manual",
+        intent.reference,
+      ],
     );
 
     // Update payment_intents status -> completed and set audit fields
@@ -435,19 +466,30 @@ app.post("/api/admin/manual-deposits/verify", async (req, res) => {
       `UPDATE payment_intents
        SET status = 'completed', verified_by = $2, verified_at = now()
        WHERE reference = $1`,
-      [intent.reference, adminId]
+      [intent.reference, adminId],
     );
 
     // Add activity log entry for manual deposit verification
     await client.query(
       `INSERT INTO activity_logs (actor_id, action, target, metadata, created_at)
        VALUES ($1, $2, $3, $4, now())`,
-      [adminId, 'verify_manual_deposit', intent.user_id, JSON.stringify({ reference: intent.reference, amount: intent.amount })]
+      [
+        adminId,
+        "verify_manual_deposit",
+        intent.user_id,
+        JSON.stringify({ reference: intent.reference, amount: intent.amount }),
+      ],
     );
 
     await client.query("COMMIT");
 
-    return res.json({ status: "ok", reference: intent.reference, user_id: intent.user_id, amount: intent.amount, newBalance });
+    return res.json({
+      status: "ok",
+      reference: intent.reference,
+      user_id: intent.user_id,
+      amount: intent.amount,
+      newBalance,
+    });
   } catch (e) {
     await client.query("ROLLBACK");
     console.error("verifyManualDeposit error:", e);
@@ -464,30 +506,46 @@ app.get("/api/admin/users", async (req, res) => {
   let isAdmin = false;
   let adminId: string | null = null;
   if (adminHeader && ADMIN_API_TOKEN && adminHeader === ADMIN_API_TOKEN) {
-    isAdmin = true; adminId = 'api-token';
+    isAdmin = true;
+    adminId = "api-token";
   } else {
     if (!requireSupabase(res)) return;
     const user = await getAuthUser(req);
     if (!user) return err(res, 401, "Unauthorized");
-    const { data: roles } = await supabaseAdmin!.from("user_roles").select("role").eq("user_id", user.id).eq("role", "admin").limit(1);
+    const { data: roles } = await supabaseAdmin!
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id)
+      .eq("role", "admin")
+      .limit(1);
     if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
-    isAdmin = true; adminId = user.id;
+    isAdmin = true;
+    adminId = user.id;
   }
 
   const q = (req.query.q as string) ?? "";
   const suspended = req.query.suspended;
   try {
-    let query = supabaseAdmin!.from("profiles").select("id,email,display_name,suspended,created_at").order("created_at", { ascending: false }).limit(200);
+    let query = supabaseAdmin!
+      .from("profiles")
+      .select("id,email,display_name,suspended,created_at")
+      .order("created_at", { ascending: false })
+      .limit(200);
     if (q) query = query.ilike("email", `%${q}%`);
     if (suspended === "true") query = query.eq("suspended", true);
     if (suspended === "false") query = query.eq("suspended", false);
     const { data, error } = await query;
     if (error) return err(res, 500, error.message);
     // Enrich with wallet balance
-    const users = (data ?? []) as any[];
+    const users = (data ?? []) as AdminUserRow[];
     const userIds = users.map((u) => u.id);
-    const { data: wallets } = await supabaseAdmin!.from("wallets").select("user_id,balance").in("user_id", userIds);
-    const walletMap = Object.fromEntries((wallets ?? []).map((w: any) => [w.user_id, w.balance]));
+    const { data: wallets } = await supabaseAdmin!
+      .from("wallets")
+      .select("user_id,balance")
+      .in("user_id", userIds);
+    const walletMap = Object.fromEntries(
+      (wallets ?? []).map((w: WalletRow) => [w.user_id, w.balance]),
+    );
     const result = users.map((u) => ({ ...u, wallet_balance: walletMap[u.id] ?? 0 }));
     return res.json({ users: result });
   } catch (e) {
@@ -498,83 +556,159 @@ app.get("/api/admin/users", async (req, res) => {
 
 app.post("/api/admin/users/:id/suspend", async (req, res) => {
   if (!requireSupabase(res)) return;
-  const user = await getAuthUser(req); if (!user) return err(res, 401, "Unauthorized");
-  const { data: roles } = await supabaseAdmin!.from("user_roles").select("role").eq("user_id", user.id).eq("role", "admin").limit(1);
+  const user = await getAuthUser(req);
+  if (!user) return err(res, 401, "Unauthorized");
+  const { data: roles } = await supabaseAdmin!
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id)
+    .eq("role", "admin")
+    .limit(1);
   if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
   const target = req.params.id;
   const { suspended } = req.body as { suspended?: boolean };
   if (suspended === undefined) return err(res, 400, "suspended is required");
-  const { error } = await supabaseAdmin!.from("profiles").update({ suspended, updated_at: new Date().toISOString() }).eq("id", target);
+  const { error } = await supabaseAdmin!
+    .from("profiles")
+    .update({ suspended, updated_at: new Date().toISOString() })
+    .eq("id", target);
   if (error) return err(res, 500, error.message);
-  await supabaseAdmin!.from("activity_logs").insert({ actor_id: user.id, action: suspended ? 'suspend_user' : 'unsuspend_user', target, metadata: { suspended } });
+  await supabaseAdmin!.from("activity_logs").insert({
+    actor_id: user.id,
+    action: suspended ? "suspend_user" : "unsuspend_user",
+    target,
+    metadata: { suspended },
+  });
   return res.json({ success: true });
 });
 
 app.post("/api/admin/users/:id/debit", async (req, res) => {
   if (!requireSupabase(res)) return;
-  const admin = await getAuthUser(req); if (!admin) return err(res, 401, "Unauthorized");
-  const { data: roles } = await supabaseAdmin!.from("user_roles").select("role").eq("user_id", admin.id).eq("role", "admin").limit(1);
+  const admin = await getAuthUser(req);
+  if (!admin) return err(res, 401, "Unauthorized");
+  const { data: roles } = await supabaseAdmin!
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", admin.id)
+    .eq("role", "admin")
+    .limit(1);
   if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
   const target = req.params.id;
   const { amount, description } = req.body as { amount?: number; description?: string };
-  if (!amount || amount <= 0 || !description) return err(res, 400, "amount and description are required");
+  if (!amount || amount <= 0 || !description)
+    return err(res, 400, "amount and description are required");
   if (!pool) return err(res, 500, "Database not configured");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const walletRes = await client.query(`SELECT id, balance FROM wallets WHERE user_id = $1 FOR UPDATE`, [target]);
-    if (walletRes.rowCount === 0) { await client.query("ROLLBACK"); return err(res, 404, "wallet not found"); }
+    const walletRes = await client.query(
+      `SELECT id, balance FROM wallets WHERE user_id = $1 FOR UPDATE`,
+      [target],
+    );
+    if (walletRes.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return err(res, 404, "wallet not found");
+    }
     const wallet = walletRes.rows[0];
     const current = Number(wallet.balance ?? 0);
-    if (current < amount) { await client.query("ROLLBACK"); return err(res, 400, "insufficient balance"); }
+    if (current < amount) {
+      await client.query("ROLLBACK");
+      return err(res, 400, "insufficient balance");
+    }
     const newBal = current - amount;
-    await client.query(`UPDATE wallets SET balance = $1, updated_at = now() WHERE id = $2`, [newBal, wallet.id]);
+    await client.query(`UPDATE wallets SET balance = $1, updated_at = now() WHERE id = $2`, [
+      newBal,
+      wallet.id,
+    ]);
     const txRef = `admin-debit-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    const txRes = await client.query(`INSERT INTO wallet_transactions (wallet_id,user_id,type,amount,balance_after,status,provider,reference,description,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now()) RETURNING id`, [wallet.id, target, 'debit', amount, newBal, 'success', 'manual', txRef, description]);
-    await client.query(`INSERT INTO activity_logs (actor_id, action, target, metadata, created_at) VALUES ($1,$2,$3,$4, now())`, [admin.id, 'admin_debit', target, JSON.stringify({ amount, description })]);
+    const txRes = await client.query(
+      `INSERT INTO wallet_transactions (wallet_id,user_id,type,amount,balance_after,status,provider,reference,description,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now()) RETURNING id`,
+      [wallet.id, target, "debit", amount, newBal, "success", "manual", txRef, description],
+    );
+    await client.query(
+      `INSERT INTO activity_logs (actor_id, action, target, metadata, created_at) VALUES ($1,$2,$3,$4, now())`,
+      [admin.id, "admin_debit", target, JSON.stringify({ amount, description })],
+    );
     await client.query("COMMIT");
     return res.json({ success: true, newBalance: newBal });
   } catch (e) {
-    await client.query("ROLLBACK"); console.error("admin debit error:", e); return err(res, 500, "Internal server error");
-  } finally { client.release(); }
+    await client.query("ROLLBACK");
+    console.error("admin debit error:", e);
+    return err(res, 500, "Internal server error");
+  } finally {
+    client.release();
+  }
 });
 
 // ─── Payment: admin-debit (alias for /api/admin/users/:id/debit) ──────────────
 app.post("/api/payment/admin-debit", async (req, res) => {
   if (!requireSupabase(res)) return;
-  const admin = await getAuthUser(req); if (!admin) return err(res, 401, "Unauthorized");
-  const { data: roles } = await supabaseAdmin!.from("user_roles").select("role").eq("user_id", admin.id).eq("role", "admin").limit(1);
+  const admin = await getAuthUser(req);
+  if (!admin) return err(res, 401, "Unauthorized");
+  const { data: roles } = await supabaseAdmin!
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", admin.id)
+    .eq("role", "admin")
+    .limit(1);
   if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
-  const { targetUserId, amount, description } = req.body as { targetUserId?: string; amount?: number; description?: string };
-  if (!targetUserId || !amount || amount <= 0 || !description) return err(res, 400, "targetUserId, amount and description are required");
+  const { targetUserId, amount, description } = req.body as {
+    targetUserId?: string;
+    amount?: number;
+    description?: string;
+  };
+  if (!targetUserId || !amount || amount <= 0 || !description)
+    return err(res, 400, "targetUserId, amount and description are required");
   if (!pool) return err(res, 500, "Database not configured");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const walletRes = await client.query(`SELECT id, balance FROM wallets WHERE user_id = $1 FOR UPDATE`, [targetUserId]);
-    if (walletRes.rowCount === 0) { await client.query("ROLLBACK"); return err(res, 404, "wallet not found"); }
+    const walletRes = await client.query(
+      `SELECT id, balance FROM wallets WHERE user_id = $1 FOR UPDATE`,
+      [targetUserId],
+    );
+    if (walletRes.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return err(res, 404, "wallet not found");
+    }
     const wallet = walletRes.rows[0];
     const current = Number(wallet.balance ?? 0);
-    if (current < amount) { await client.query("ROLLBACK"); return err(res, 400, "insufficient balance"); }
+    if (current < amount) {
+      await client.query("ROLLBACK");
+      return err(res, 400, "insufficient balance");
+    }
     const newBal = current - amount;
-    await client.query(`UPDATE wallets SET balance = $1, updated_at = now() WHERE id = $2`, [newBal, wallet.id]);
+    await client.query(`UPDATE wallets SET balance = $1, updated_at = now() WHERE id = $2`, [
+      newBal,
+      wallet.id,
+    ]);
     const txRef = `admin-debit-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    await client.query(`INSERT INTO wallet_transactions (wallet_id,user_id,type,amount,balance_after,status,provider,reference,description,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())`, [wallet.id, targetUserId, 'debit', amount, newBal, 'success', 'manual', txRef, description]);
-    await client.query(`INSERT INTO activity_logs (actor_id, action, target, metadata, created_at) VALUES ($1,$2,$3,$4, now())`, [admin.id, 'admin_debit_wallet', targetUserId, JSON.stringify({ amount, description })]);
+    await client.query(
+      `INSERT INTO wallet_transactions (wallet_id,user_id,type,amount,balance_after,status,provider,reference,description,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())`,
+      [wallet.id, targetUserId, "debit", amount, newBal, "success", "manual", txRef, description],
+    );
+    await client.query(
+      `INSERT INTO activity_logs (actor_id, action, target, metadata, created_at) VALUES ($1,$2,$3,$4, now())`,
+      [admin.id, "admin_debit_wallet", targetUserId, JSON.stringify({ amount, description })],
+    );
     await client.query("COMMIT");
     return res.json({ success: true, newBalance: newBal });
   } catch (e) {
-    await client.query("ROLLBACK"); console.error("admin-debit error:", e); return err(res, 500, "Internal server error");
-  } finally { client.release(); }
+    await client.query("ROLLBACK");
+    console.error("admin-debit error:", e);
+    return err(res, 500, "Internal server error");
+  } finally {
+    client.release();
+  }
 });
 
 // Admin credit already exists as /api/payment/admin-credit
 
 // ─── Monnify payment routes ───────────────────────────────────────────────────
-const MONNIFY_API_KEY     = process.env.MONNIFY_API_KEY ?? "";
-const MONNIFY_SECRET_KEY  = process.env.MONNIFY_SECRET_KEY ?? "";
-const MONNIFY_BASE_URL    = process.env.MONNIFY_BASE_URL ?? "https://sandbox.monnify.com";
-const MONNIFY_CONTRACT    = process.env.MONNIFY_CONTRACT_CODE ?? "";
+const MONNIFY_API_KEY = process.env.MONNIFY_API_KEY ?? "";
+const MONNIFY_SECRET_KEY = process.env.MONNIFY_SECRET_KEY ?? "";
+const MONNIFY_BASE_URL = process.env.MONNIFY_BASE_URL ?? "https://sandbox.monnify.com";
+const MONNIFY_CONTRACT = process.env.MONNIFY_CONTRACT_CODE ?? "";
 
 async function getMonnifyToken(): Promise<string | null> {
   if (!MONNIFY_API_KEY || !MONNIFY_SECRET_KEY) return null;
@@ -587,22 +721,38 @@ async function getMonnifyToken(): Promise<string | null> {
     if (!r.ok) return null;
     const j = (await r.json()) as { responseBody?: { accessToken?: string } };
     return j.responseBody?.accessToken ?? null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 app.post("/api/payment/init-monnify", async (req, res) => {
   if (!requireSupabase(res)) return;
-  const user = await getAuthUser(req); if (!user) return err(res, 401, "Unauthorized");
-  const { amount, userId, reference } = req.body as { amount?: number; userId?: string; reference?: string };
-  if (!amount || !userId || !reference) return err(res, 400, "amount, userId and reference are required");
+  const user = await getAuthUser(req);
+  if (!user) return err(res, 401, "Unauthorized");
+  const { amount, userId, reference } = req.body as {
+    amount?: number;
+    userId?: string;
+    reference?: string;
+  };
+  if (!amount || !userId || !reference)
+    return err(res, 400, "amount, userId and reference are required");
   if (userId !== user.id) return err(res, 403, "Forbidden");
-  if (!MONNIFY_API_KEY || !MONNIFY_SECRET_KEY || !MONNIFY_CONTRACT) return err(res, 500, "Monnify is not configured — contact support");
+  if (!MONNIFY_API_KEY || !MONNIFY_SECRET_KEY || !MONNIFY_CONTRACT)
+    return err(res, 500, "Monnify is not configured — contact support");
 
   const token = await getMonnifyToken();
   if (!token) return err(res, 502, "Could not authenticate with Monnify");
 
-  const siteUrl = process.env.VITE_SITE_URL ?? (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "");
-  const { data: intent } = await supabaseAdmin!.from("payment_intents").select("id").eq("reference", reference).eq("user_id", userId).single();
+  const siteUrl =
+    process.env.VITE_SITE_URL ??
+    (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "");
+  const { data: intent } = await supabaseAdmin!
+    .from("payment_intents")
+    .select("id")
+    .eq("reference", reference)
+    .eq("user_id", userId)
+    .single();
   if (!intent) return err(res, 400, "Invalid payment reference");
 
   try {
@@ -621,22 +771,43 @@ app.post("/api/payment/init-monnify", async (req, res) => {
         paymentMethods: ["CARD", "ACCOUNT_TRANSFER", "USSD"],
       }),
     });
-    if (!r.ok) { const t = await r.text(); return err(res, 502, `Monnify error: ${t}`); }
-    const j = (await r.json()) as { responseBody?: { checkoutUrl?: string; transactionReference?: string } };
-    return res.json({ checkoutUrl: j.responseBody?.checkoutUrl, transactionReference: j.responseBody?.transactionReference });
-  } catch { return err(res, 502, "Could not reach Monnify — please try again later"); }
+    if (!r.ok) {
+      const t = await r.text();
+      return err(res, 502, `Monnify error: ${t}`);
+    }
+    const j = (await r.json()) as {
+      responseBody?: { checkoutUrl?: string; transactionReference?: string };
+    };
+    return res.json({
+      checkoutUrl: j.responseBody?.checkoutUrl,
+      transactionReference: j.responseBody?.transactionReference,
+    });
+  } catch {
+    return err(res, 502, "Could not reach Monnify — please try again later");
+  }
 });
 
 app.post("/api/payment/verify-monnify", async (req, res) => {
   if (!requireSupabase(res)) return;
-  const user = await getAuthUser(req); if (!user) return err(res, 401, "Unauthorized");
+  const user = await getAuthUser(req);
+  if (!user) return err(res, 401, "Unauthorized");
   const { reference, userId } = req.body as { reference?: string; userId?: string };
   if (!reference || !userId) return err(res, 400, "reference and userId are required");
   if (userId !== user.id) return err(res, 403, "Forbidden");
 
-  const { data: intent } = await supabaseAdmin!.from("payment_intents").select("*").eq("reference", reference).eq("user_id", userId).single();
+  const { data: intent } = await supabaseAdmin!
+    .from("payment_intents")
+    .select("*")
+    .eq("reference", reference)
+    .eq("user_id", userId)
+    .single();
   if (!intent) return err(res, 400, "Invalid payment reference");
-  if ((intent as Record<string, unknown>).status === "success") return res.json({ success: true, amount: Number((intent as Record<string, unknown>).amount), alreadyCredited: true });
+  if ((intent as Record<string, unknown>).status === "success")
+    return res.json({
+      success: true,
+      amount: Number((intent as Record<string, unknown>).amount),
+      alreadyCredited: true,
+    });
 
   if (!MONNIFY_API_KEY || !MONNIFY_SECRET_KEY) return err(res, 500, "Monnify is not configured");
   const token = await getMonnifyToken();
@@ -648,41 +819,74 @@ app.post("/api/payment/verify-monnify", async (req, res) => {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!r.ok) return err(res, 502, "Could not verify with Monnify");
-    const j = (await r.json()) as { responseBody?: { paymentStatus?: string; amountPaid?: number } };
+    const j = (await r.json()) as {
+      responseBody?: { paymentStatus?: string; amountPaid?: number };
+    };
     if (j.responseBody?.paymentStatus !== "PAID") return err(res, 400, "Payment not confirmed");
 
     const amount = j.responseBody?.amountPaid ?? Number((intent as Record<string, unknown>).amount);
-    const { error: creditErr } = await supabaseAdmin!.rpc("credit_wallet" as never, { _user_id: userId, _amount: amount, _provider: "monnify", _reference: reference, _description: "Wallet funded via Monnify" } as never);
+    const { error: creditErr } = await supabaseAdmin!.rpc(
+      "credit_wallet" as never,
+      {
+        _user_id: userId,
+        _amount: amount,
+        _provider: "monnify",
+        _reference: reference,
+        _description: "Wallet funded via Monnify",
+      } as never,
+    );
     if (creditErr) return err(res, 500, (creditErr as { message: string }).message);
-    await supabaseAdmin!.from("payment_intents").update({ status: "success", updated_at: new Date().toISOString() }).eq("reference", reference);
+    await supabaseAdmin!
+      .from("payment_intents")
+      .update({ status: "success", updated_at: new Date().toISOString() })
+      .eq("reference", reference);
     return res.json({ success: true, amount, alreadyCredited: false });
-  } catch { return err(res, 502, "Could not reach Monnify — please try again later"); }
+  } catch {
+    return err(res, 502, "Could not reach Monnify — please try again later");
+  }
 });
 
 // ─── Wallet ensure ────────────────────────────────────────────────────────────
 app.post("/api/wallet/ensure", async (req, res) => {
   if (!requireSupabase(res)) return;
-  const user = await getAuthUser(req); if (!user) return err(res, 401, "Unauthorized");
+  const user = await getAuthUser(req);
+  if (!user) return err(res, 401, "Unauthorized");
   const { userId } = req.body as { userId?: string };
   if (!userId || userId !== user.id) return err(res, 403, "Forbidden");
   try {
-    const { data: existing } = await supabaseAdmin!.from("wallets").select("id,balance,currency,updated_at").eq("user_id", userId).maybeSingle();
+    const { data: existing } = await supabaseAdmin!
+      .from("wallets")
+      .select("id,balance,currency,updated_at")
+      .eq("user_id", userId)
+      .maybeSingle();
     if (existing) return res.json({ wallet: existing });
-    const { data: created, error: insErr } = await supabaseAdmin!.from("wallets").insert({ user_id: userId, balance: 0, currency: "NGN" }).select("id,balance,currency,updated_at").single();
+    const { data: created, error: insErr } = await supabaseAdmin!
+      .from("wallets")
+      .insert({ user_id: userId, balance: 0, currency: "NGN" })
+      .select("id,balance,currency,updated_at")
+      .single();
     if (insErr) return err(res, 500, insErr.message);
     return res.json({ wallet: created });
-  } catch (e) { console.error("wallet/ensure error:", e); return err(res, 500, "Internal server error"); }
+  } catch (e) {
+    console.error("wallet/ensure error:", e);
+    return err(res, 500, "Internal server error");
+  }
 });
 
 // ─── Delivery routes ──────────────────────────────────────────────────────────
 app.post("/api/delivery/assign-credential", async (req, res) => {
   if (!requireSupabase(res)) return;
-  const user = await getAuthUser(req); if (!user) return err(res, 401, "Unauthorized");
+  const user = await getAuthUser(req);
+  if (!user) return err(res, 401, "Unauthorized");
   const { orderId, productId } = req.body as { orderId?: string; productId?: string };
   if (!orderId || !productId) return err(res, 400, "orderId and productId are required");
 
   // Verify user owns the order
-  const { data: order } = await supabaseAdmin!.from("orders").select("id,user_id").eq("id", orderId).single();
+  const { data: order } = await supabaseAdmin!
+    .from("orders")
+    .select("id,user_id")
+    .eq("id", orderId)
+    .single();
   if (!order) return err(res, 404, "Order not found");
   if ((order as Record<string, unknown>).user_id !== user.id) return err(res, 403, "Forbidden");
 
@@ -693,33 +897,48 @@ app.post("/api/delivery/assign-credential", async (req, res) => {
     // FIFO: pick the oldest unassigned credential for this product
     const credRes = await client.query(
       `SELECT id, content, label FROM product_credentials WHERE product_id = $1 AND order_id IS NULL ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
-      [productId]
+      [productId],
     );
     if (credRes.rowCount === 0) {
       await client.query("ROLLBACK");
-      return res.json({ assigned: false, content: null, label: null, message: "No available credentials — contact support" });
+      return res.json({
+        assigned: false,
+        content: null,
+        label: null,
+        message: "No available credentials — contact support",
+      });
     }
     const cred = credRes.rows[0];
     await client.query(
       `UPDATE product_credentials SET order_id = $1, delivered_at = now() WHERE id = $2`,
-      [orderId, cred.id]
+      [orderId, cred.id],
     );
     // Also stamp delivered_payload on order_items so the user's orders page can display it
     await client.query(
       `UPDATE order_items SET delivered_payload = $1 WHERE order_id = $2 AND product_id = $3 AND delivered_payload IS NULL LIMIT 1`,
-      [cred.content, orderId, productId]
+      [cred.content, orderId, productId],
     );
     await client.query("COMMIT");
     return res.json({ assigned: true, content: cred.content, label: cred.label ?? null });
   } catch (e) {
-    await client.query("ROLLBACK"); console.error("assign-credential error:", e); return err(res, 500, "Internal server error");
-  } finally { client.release(); }
+    await client.query("ROLLBACK");
+    console.error("assign-credential error:", e);
+    return err(res, 500, "Internal server error");
+  } finally {
+    client.release();
+  }
 });
 
 app.post("/api/delivery/admin-redispense", async (req, res) => {
   if (!requireSupabase(res)) return;
-  const admin = await getAuthUser(req); if (!admin) return err(res, 401, "Unauthorized");
-  const { data: roles } = await supabaseAdmin!.from("user_roles").select("role").eq("user_id", admin.id).eq("role", "admin").limit(1);
+  const admin = await getAuthUser(req);
+  if (!admin) return err(res, 401, "Unauthorized");
+  const { data: roles } = await supabaseAdmin!
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", admin.id)
+    .eq("role", "admin")
+    .limit(1);
   if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
   const { orderId, productId } = req.body as { orderId?: string; productId?: string };
   if (!orderId || !productId) return err(res, 400, "orderId and productId are required");
@@ -730,47 +949,72 @@ app.post("/api/delivery/admin-redispense", async (req, res) => {
     await client.query("BEGIN");
     const credRes = await client.query(
       `SELECT id, content, label FROM product_credentials WHERE product_id = $1 AND order_id IS NULL ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`,
-      [productId]
+      [productId],
     );
     if (credRes.rowCount === 0) {
       await client.query("ROLLBACK");
-      return res.json({ assigned: false, message: "No available credentials — add more in the Credentials panel" });
+      return res.json({
+        assigned: false,
+        message: "No available credentials — add more in the Credentials panel",
+      });
     }
     const cred = credRes.rows[0];
     await client.query(
       `UPDATE product_credentials SET order_id = $1, delivered_at = now() WHERE id = $2`,
-      [orderId, cred.id]
+      [orderId, cred.id],
     );
     // Stamp delivered_payload on order_items so user can see it
     await client.query(
       `UPDATE order_items SET delivered_payload = $1 WHERE order_id = $2 AND product_id = $3 AND delivered_payload IS NULL LIMIT 1`,
-      [cred.content, orderId, productId]
+      [cred.content, orderId, productId],
     );
-    await client.query(`INSERT INTO activity_logs (actor_id, action, target, metadata, created_at) VALUES ($1,'admin_redispense_credential',$2,$3,now())`,
-      [admin.id, orderId, JSON.stringify({ productId, credentialId: cred.id })]);
+    await client.query(
+      `INSERT INTO activity_logs (actor_id, action, target, metadata, created_at) VALUES ($1,'admin_redispense_credential',$2,$3,now())`,
+      [admin.id, orderId, JSON.stringify({ productId, credentialId: cred.id })],
+    );
     await client.query("COMMIT");
     return res.json({ assigned: true, content: cred.content, label: cred.label ?? null });
   } catch (e) {
-    await client.query("ROLLBACK"); console.error("admin-redispense error:", e); return err(res, 500, "Internal server error");
-  } finally { client.release(); }
+    await client.query("ROLLBACK");
+    console.error("admin-redispense error:", e);
+    return err(res, 500, "Internal server error");
+  } finally {
+    client.release();
+  }
 });
 
 // ─── Products CRUD ────────────────────────────────────────────────────────────
 async function requireAdmin(req: express.Request, res: express.Response): Promise<string | null> {
   if (!requireSupabase(res)) return null;
-  const user = await getAuthUser(req); if (!user) { err(res, 401, "Unauthorized"); return null; }
-  const { data: roles } = await supabaseAdmin!.from("user_roles").select("role").eq("user_id", user.id).eq("role", "admin").limit(1);
-  if (!roles || roles.length === 0) { err(res, 403, "Forbidden"); return null; }
+  const user = await getAuthUser(req);
+  if (!user) {
+    err(res, 401, "Unauthorized");
+    return null;
+  }
+  const { data: roles } = await supabaseAdmin!
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id)
+    .eq("role", "admin")
+    .limit(1);
+  if (!roles || roles.length === 0) {
+    err(res, 403, "Forbidden");
+    return null;
+  }
   return user.id;
 }
 
 app.post("/api/products/upsert", async (req, res) => {
-  const adminId = await requireAdmin(req, res); if (!adminId) return;
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
   const body = req.body as Record<string, unknown>;
   try {
     if (body.id) {
       const { id, ...rest } = body;
-      const { error } = await supabaseAdmin!.from("products").update(rest).eq("id", id as string);
+      const { error } = await supabaseAdmin!
+        .from("products")
+        .update(rest)
+        .eq("id", id as string);
       if (error) return err(res, 500, error.message);
       return res.json({ success: true });
     } else {
@@ -778,11 +1022,15 @@ app.post("/api/products/upsert", async (req, res) => {
       if (error) return err(res, 500, error.message);
       return res.json({ success: true });
     }
-  } catch (e) { console.error("products/upsert error:", e); return err(res, 500, "Internal server error"); }
+  } catch (e) {
+    console.error("products/upsert error:", e);
+    return err(res, 500, "Internal server error");
+  }
 });
 
 app.delete("/api/products/:id", async (req, res) => {
-  const adminId = await requireAdmin(req, res); if (!adminId) return;
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
   const { error } = await supabaseAdmin!.from("products").delete().eq("id", req.params.id);
   if (error) return err(res, 500, error.message);
   return res.json({ success: true });
@@ -790,152 +1038,258 @@ app.delete("/api/products/:id", async (req, res) => {
 
 // ─── Categories CRUD ──────────────────────────────────────────────────────────
 app.post("/api/categories/upsert", async (req, res) => {
-  const adminId = await requireAdmin(req, res); if (!adminId) return;
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
   const body = req.body as Record<string, unknown>;
   try {
     if (body.id) {
       const { id, ...rest } = body;
-      const { error } = await supabaseAdmin!.from("product_categories").update(rest).eq("id", id as string);
+      const { error } = await supabaseAdmin!
+        .from("product_categories")
+        .update(rest)
+        .eq("id", id as string);
       if (error) return err(res, 500, error.message);
     } else {
       const { error } = await supabaseAdmin!.from("product_categories").insert(body);
       if (error) return err(res, 500, error.message);
     }
     return res.json({ success: true });
-  } catch (e) { console.error("categories/upsert error:", e); return err(res, 500, "Internal server error"); }
+  } catch (e) {
+    console.error("categories/upsert error:", e);
+    return err(res, 500, "Internal server error");
+  }
 });
 
 app.delete("/api/categories/:id", async (req, res) => {
-  const adminId = await requireAdmin(req, res); if (!adminId) return;
-  const { error } = await supabaseAdmin!.from("product_categories").delete().eq("id", req.params.id);
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
+  const { error } = await supabaseAdmin!
+    .from("product_categories")
+    .delete()
+    .eq("id", req.params.id);
   if (error) return err(res, 500, error.message);
   return res.json({ success: true });
 });
 
 // ─── Notifications APIs ─────────────────────────────────────────────────────
-app.post('/api/admin/notifications/send', async (req, res) => {
+app.post("/api/admin/notifications/send", async (req, res) => {
   // Admin only
   const adminHeader = req.header("X-Admin-Token");
-  let isAdmin = false; let adminId: string | null = null;
-  if (adminHeader && ADMIN_API_TOKEN && adminHeader === ADMIN_API_TOKEN) { isAdmin = true; adminId = 'api-token'; }
-  else { if (!requireSupabase(res)) return; const user = await getAuthUser(req); if (!user) return err(res,401,'Unauthorized'); const { data: roles } = await supabaseAdmin!.from('user_roles').select('role').eq('user_id', user.id).eq('role','admin').limit(1); if (!roles || roles.length===0) return err(res,403,'Forbidden'); isAdmin=true; adminId = user.id; }
+  let isAdmin = false;
+  let adminId: string | null = null;
+  if (adminHeader && ADMIN_API_TOKEN && adminHeader === ADMIN_API_TOKEN) {
+    isAdmin = true;
+    adminId = "api-token";
+  } else {
+    if (!requireSupabase(res)) return;
+    const user = await getAuthUser(req);
+    if (!user) return err(res, 401, "Unauthorized");
+    const { data: roles } = await supabaseAdmin!
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id)
+      .eq("role", "admin")
+      .limit(1);
+    if (!roles || roles.length === 0) return err(res, 403, "Forbidden");
+    isAdmin = true;
+    adminId = user.id;
+  }
 
-  const { title, message, userIds } = req.body as { title?: string; message?: string; userIds?: string[] };
-  if (!title || !message) return err(res,400,'title and message required');
+  const { title, message, userIds } = req.body as {
+    title?: string;
+    message?: string;
+    userIds?: string[];
+  };
+  if (!title || !message) return err(res, 400, "title and message required");
   try {
     if (!userIds || userIds.length === 0) {
       // Broadcast
-      const { error } = await supabaseAdmin!.from('notifications').insert({ title, message, target_user_id: null, created_by: adminId });
-      if (error) return err(res,500,error.message);
-      await supabaseAdmin!.from('activity_logs').insert({ actor_id: adminId, action: 'send_notification_broadcast', metadata: { title } });
+      const { error } = await supabaseAdmin!
+        .from("notifications")
+        .insert({ title, message, target_user_id: null, created_by: adminId });
+      if (error) return err(res, 500, error.message);
+      await supabaseAdmin!
+        .from("activity_logs")
+        .insert({ actor_id: adminId, action: "send_notification_broadcast", metadata: { title } });
       return res.json({ success: true });
     }
     // Send to selected users
-    const rows = userIds.map((uid) => ({ title, message, target_user_id: uid, created_by: adminId }));
-    const { error } = await supabaseAdmin!.from('notifications').insert(rows);
-    if (error) return err(res,500,error.message);
-    await supabaseAdmin!.from('activity_logs').insert({ actor_id: adminId, action: 'send_notification_selected', metadata: { title, user_count: userIds.length } });
+    const rows = userIds.map((uid) => ({
+      title,
+      message,
+      target_user_id: uid,
+      created_by: adminId,
+    }));
+    const { error } = await supabaseAdmin!.from("notifications").insert(rows);
+    if (error) return err(res, 500, error.message);
+    await supabaseAdmin!.from("activity_logs").insert({
+      actor_id: adminId,
+      action: "send_notification_selected",
+      metadata: { title, user_count: userIds.length },
+    });
     return res.json({ success: true });
-  } catch (e) { console.error('send notif error', e); return err(res,500,'Internal server error'); }
+  } catch (e) {
+    console.error("send notif error", e);
+    return err(res, 500, "Internal server error");
+  }
 });
 
-app.get('/api/notifications', async (req, res) => {
-  if (!requireSupabase(res)) return; const user = await getAuthUser(req); if (!user) return err(res,401,'Unauthorized');
+app.get("/api/notifications", async (req, res) => {
+  if (!requireSupabase(res)) return;
+  const user = await getAuthUser(req);
+  if (!user) return err(res, 401, "Unauthorized");
   try {
-    const { data } = await supabaseAdmin!.from('notifications').select('id,title,message,target_user_id,created_at,created_by').or(`target_user_id.is.null,target_user_id.eq.${user.id}`).order('created_at', { ascending: false }).limit(200);
+    const { data } = await supabaseAdmin!
+      .from("notifications")
+      .select("id,title,message,target_user_id,created_at,created_by")
+      .or(`target_user_id.is.null,target_user_id.eq.${user.id}`)
+      .order("created_at", { ascending: false })
+      .limit(200);
     // Include read status
-    const ids = (data ?? []).map((n: any) => n.id);
-    const { data: reads } = await supabaseAdmin!.from('notification_reads').select('notification_id,user_id,read_at').in('notification_id', ids).eq('user_id', user.id);
-    const readSet = new Set((reads ?? []).map((r: any) => r.notification_id));
-    const out = (data ?? []).map((n: any) => ({ ...n, read: readSet.has(n.id) }));
+    const ids = (data ?? []).map((n: { id: string }) => n.id);
+    const { data: reads } = await supabaseAdmin!
+      .from("notification_reads")
+      .select("notification_id,user_id,read_at")
+      .in("notification_id", ids)
+      .eq("user_id", user.id);
+    const readSet = new Set(
+      (reads ?? []).map((r: { notification_id: string }) => r.notification_id),
+    );
+    const out = (data ?? []).map((n: { id: string }) => ({ ...n, read: readSet.has(n.id) }));
     return res.json({ notifications: out });
-  } catch (e) { console.error('/api/notifications error', e); return err(res,500,'Internal server error'); }
+  } catch (e) {
+    console.error("/api/notifications error", e);
+    return err(res, 500, "Internal server error");
+  }
 });
 
-app.post('/api/notifications/:id/read', async (req, res) => {
-  if (!requireSupabase(res)) return; const user = await getAuthUser(req); if (!user) return err(res,401,'Unauthorized');
+app.post("/api/notifications/:id/read", async (req, res) => {
+  if (!requireSupabase(res)) return;
+  const user = await getAuthUser(req);
+  if (!user) return err(res, 401, "Unauthorized");
   const id = req.params.id;
   try {
-    const { error } = await supabaseAdmin!.from('notification_reads').insert({ notification_id: id, user_id: user.id });
-    if (error) return err(res,500,error.message);
+    const { error } = await supabaseAdmin!
+      .from("notification_reads")
+      .insert({ notification_id: id, user_id: user.id });
+    if (error) return err(res, 500, error.message);
     return res.json({ success: true });
-  } catch (e) { console.error('mark read', e); return err(res,500,'Internal server error'); }
+  } catch (e) {
+    console.error("mark read", e);
+    return err(res, 500, "Internal server error");
+  }
 });
 
 // ─── Marketplace chat APIs ──────────────────────────────────────────────────
-app.post('/api/marketplace/conversations', async (req, res) => {
+app.post("/api/marketplace/conversations", async (req, res) => {
   // Create or return an existing conversation for this product between buyer and seller
-  const adminHeader = req.header('X-Admin-Token');
-  if (!requireSupabase(res) && !(adminHeader && ADMIN_API_TOKEN && adminHeader === ADMIN_API_TOKEN)) return;
+  const adminHeader = req.header("X-Admin-Token");
+  if (!requireSupabase(res) && !(adminHeader && ADMIN_API_TOKEN && adminHeader === ADMIN_API_TOKEN))
+    return;
 
   const user = await getAuthUser(req);
   const { productId, sellerId } = req.body as { productId?: string; sellerId?: string };
-  if (!productId) return err(res, 400, 'productId is required');
+  if (!productId) return err(res, 400, "productId is required");
 
   // If called with admin token, allow specifying buyerId in body
-  const buyerIdFromBody = (req.body as any).buyerId as string | undefined;
+  const buyerIdFromBody = (req.body as { buyerId?: string }).buyerId;
   const buyerId = user?.id ?? buyerIdFromBody ?? null;
-  if (!buyerId) return err(res, 401, 'Unauthorized');
+  if (!buyerId) return err(res, 401, "Unauthorized");
 
   try {
-    const { data: existing } = await supabaseAdmin!.from('marketplace_conversations').select('*').eq('product_id', productId).eq('buyer_id', buyerId).limit(1);
+    const { data: existing } = await supabaseAdmin!
+      .from("marketplace_conversations")
+      .select("*")
+      .eq("product_id", productId)
+      .eq("buyer_id", buyerId)
+      .limit(1);
     if (existing && existing.length > 0) return res.json({ conversation: existing[0] });
 
-    const { data, error } = await supabaseAdmin!.from('marketplace_conversations').insert({ product_id: productId, buyer_id: buyerId, seller_id: sellerId }).select('*').single();
+    const { data, error } = await supabaseAdmin!
+      .from("marketplace_conversations")
+      .insert({ product_id: productId, buyer_id: buyerId, seller_id: sellerId })
+      .select("*")
+      .single();
     if (error) return err(res, 500, error.message);
     return res.json({ conversation: data });
   } catch (e) {
-    console.error('create conversation error', e);
-    return err(res, 500, 'Internal server error');
+    console.error("create conversation error", e);
+    return err(res, 500, "Internal server error");
   }
 });
 
-app.get('/api/marketplace/conversations/:id/messages', async (req, res) => {
+app.get("/api/marketplace/conversations/:id/messages", async (req, res) => {
   if (!requireSupabase(res)) return;
-  const user = await getAuthUser(req); if (!user) return err(res, 401, 'Unauthorized');
+  const user = await getAuthUser(req);
+  if (!user) return err(res, 401, "Unauthorized");
   const convId = req.params.id;
   try {
-    const { data: conv } = await supabaseAdmin!.from('marketplace_conversations').select('*').eq('id', convId).single();
-    if (!conv) return err(res, 404, 'conversation not found');
-    if (conv.buyer_id !== user.id && conv.seller_id !== user.id) return err(res, 403, 'Forbidden');
+    const { data: conv } = await supabaseAdmin!
+      .from("marketplace_conversations")
+      .select("*")
+      .eq("id", convId)
+      .single();
+    if (!conv) return err(res, 404, "conversation not found");
+    if (conv.buyer_id !== user.id && conv.seller_id !== user.id) return err(res, 403, "Forbidden");
 
-    const { data: msgs, error } = await supabaseAdmin!.from('marketplace_messages').select('*').eq('conversation_id', convId).order('created_at', { ascending: true }).limit(1000);
+    const { data: msgs, error } = await supabaseAdmin!
+      .from("marketplace_messages")
+      .select("*")
+      .eq("conversation_id", convId)
+      .order("created_at", { ascending: true })
+      .limit(1000);
     if (error) return err(res, 500, error.message);
     return res.json({ messages: msgs ?? [] });
   } catch (e) {
-    console.error('fetch messages error', e);
-    return err(res, 500, 'Internal server error');
+    console.error("fetch messages error", e);
+    return err(res, 500, "Internal server error");
   }
 });
 
-app.post('/api/marketplace/conversations/:id/messages', async (req, res) => {
+app.post("/api/marketplace/conversations/:id/messages", async (req, res) => {
   if (!requireSupabase(res)) return;
-  const user = await getAuthUser(req); if (!user) return err(res, 401, 'Unauthorized');
+  const user = await getAuthUser(req);
+  if (!user) return err(res, 401, "Unauthorized");
   const convId = req.params.id;
-  const { message, metadata } = req.body as { message?: string; metadata?: Record<string, unknown> };
-  if (!message) return err(res, 400, 'message is required');
+  const { message, metadata } = req.body as {
+    message?: string;
+    metadata?: Record<string, unknown>;
+  };
+  if (!message) return err(res, 400, "message is required");
 
   try {
-    const { data: conv } = await supabaseAdmin!.from('marketplace_conversations').select('*').eq('id', convId).single();
-    if (!conv) return err(res, 404, 'conversation not found');
-    if (conv.buyer_id !== user.id && conv.seller_id !== user.id) return err(res, 403, 'Forbidden');
+    const { data: conv } = await supabaseAdmin!
+      .from("marketplace_conversations")
+      .select("*")
+      .eq("id", convId)
+      .single();
+    if (!conv) return err(res, 404, "conversation not found");
+    if (conv.buyer_id !== user.id && conv.seller_id !== user.id) return err(res, 403, "Forbidden");
 
-    const { data, error } = await supabaseAdmin!.from('marketplace_messages').insert({ conversation_id: convId, sender_id: user.id, message, metadata }).select('*').single();
+    const { data, error } = await supabaseAdmin!
+      .from("marketplace_messages")
+      .insert({ conversation_id: convId, sender_id: user.id, message, metadata })
+      .select("*")
+      .single();
     if (error) return err(res, 500, error.message);
 
     // Optionally create a notification for the other party
     const target = conv.buyer_id === user.id ? conv.seller_id : conv.buyer_id;
     if (target) {
-      await supabaseAdmin!.from('notifications').insert({ title: 'New message', message: (message.length > 140 ? message.slice(0, 137) + '...' : message), target_user_id: target, created_by: user.id });
+      await supabaseAdmin!.from("notifications").insert({
+        title: "New message",
+        message: message.length > 140 ? message.slice(0, 137) + "..." : message,
+        target_user_id: target,
+        created_by: user.id,
+      });
     }
 
     return res.json({ message: data });
   } catch (e) {
-    console.error('post message error', e);
-    return err(res, 500, 'Internal server error');
+    console.error("post message error", e);
+    return err(res, 500, "Internal server error");
   }
 });
-
 
 // ─── Static file serving ──────────────────────────────────────────────────
 app.use("/uploads", express.static(uploadsDir));
@@ -951,14 +1305,20 @@ if (IS_PROD) {
 
 // ─── Start ──────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT ?? process.env.API_PORT ?? (IS_PROD ? "5000" : "3001"), 10);
+app.use("/api", logsRouter);
+
 app.listen(PORT, "0.0.0.0", async () => {
   console.log(`[API] Server running on port ${PORT} (${IS_PROD ? "production" : "development"})`);
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) console.warn("[API] ⚠️  Supabase not configured — add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to Replit Secrets");
-  if (!PAYSTACK_SECRET_KEY)  console.warn("[API] ⚠️  PAYSTACK_SECRET_KEY not set");
-  if (!NOWPAYMENTS_API_KEY)  console.warn("[API] ⚠️  NOWPAYMENTS_API_KEY not set");
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY)
+    console.warn(
+      "[API] ⚠️  Supabase not configured — add SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to Replit Secrets",
+    );
+  if (!NEURAPAY_SECRET_KEY) console.warn("[API] ⚠️  NEURAPAY_SECRET_KEY not set");
   if (ADMIN_EMAIL) {
     await seedAdmin();
   } else {
-    console.log("[API] ℹ️  ADMIN_EMAIL not set — skipping admin seed. Add it to Replit Secrets to auto-grant admin.");
+    console.log(
+      "[API] ℹ️  ADMIN_EMAIL not set — skipping admin seed. Add it to Replit Secrets to auto-grant admin.",
+    );
   }
 });

@@ -3,7 +3,7 @@
 
 export async function onRequestPost({ request, env }) {
   const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
-  const serviceKey  = env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || "";
   if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
 
   const auth = request.headers.get("Authorization") || "";
@@ -11,8 +11,11 @@ export async function onRequestPost({ request, env }) {
   const user = await getUser(supabaseUrl, serviceKey, auth.slice(7));
   if (!user) return json({ error: "Unauthorized" }, 401);
 
-  const rolesRes = await sbFetch(supabaseUrl, serviceKey,
-    `/rest/v1/user_roles?user_id=eq.${user.id}&role=eq.admin&limit=1`);
+  const rolesRes = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/user_roles?user_id=eq.${user.id}&role=eq.admin&limit=1`,
+  );
   const roles = await rolesRes.json();
   if (!roles?.length) return json({ error: "Forbidden" }, 403);
 
@@ -21,8 +24,7 @@ export async function onRequestPost({ request, env }) {
   const now = new Date().toISOString();
 
   if (id) {
-    const res = await sbFetch(supabaseUrl, serviceKey,
-      `/rest/v1/products?id=eq.${id}`, {
+    const res = await sbFetch(supabaseUrl, serviceKey, `/rest/v1/products?id=eq.${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Prefer: "return=representation" },
       body: JSON.stringify({ ...payload, updated_at: now }),

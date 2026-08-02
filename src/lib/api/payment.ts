@@ -27,58 +27,40 @@ async function callApi<T>(path: string, body: Record<string, unknown>): Promise<
   return res.json() as Promise<T>;
 }
 
-export async function initOpayPayment(data: { amount: number; userId: string; reference: string }) {
-  return callApi<{ checkoutUrl: string; orderNo: string }>(
-    "/api/payment/init-opay",
-    data
-  );
+export async function initNeuraPayDeposit(data: {
+  amount: number;
+  userId: string;
+  reference: string;
+}) {
+  return callApi<{
+    success: boolean;
+    amount: number;
+    reference: string;
+    accountNumber: string;
+    bankName: string;
+    instructions: string;
+  }>("/api/payment/init-neurapay", data);
 }
 
-export async function verifyOpayPayment(data: { reference: string; userId: string }) {
+export async function verifyNeuraPayDeposit(data: { reference: string; userId: string }) {
   return callApi<{ success: boolean; amount: number; alreadyCredited: boolean }>(
-    "/api/payment/verify-opay",
-    data
+    "/api/payment/verify-neurapay",
+    data,
   );
 }
 
-export async function createNowPaymentsInvoice(data: { amount: number; userId: string; reference: string }) {
-  return callApi<{ invoiceUrl: string; invoiceId: string }>(
-    "/api/payment/nowpayments-invoice",
-    data
-  );
+export async function adminCreditWalletFn(data: {
+  targetUserId: string;
+  amount: number;
+  description: string;
+}) {
+  return callApi<{ success: boolean }>("/api/payment/admin-credit", data);
 }
 
-export async function checkNowPaymentsStatus(data: { reference: string; userId: string }) {
-  return callApi<{ status: string; alreadyCredited: boolean }>(
-    "/api/payment/nowpayments-status",
-    data
-  );
-}
-
-export async function adminCreditWalletFn(data: { targetUserId: string; amount: number; description: string }) {
-  return callApi<{ success: boolean }>(
-    "/api/payment/admin-credit",
-    data
-  );
-}
-
-export async function adminDebitWalletFn(data: { targetUserId: string; amount: number; description: string }) {
-  return callApi<{ success: boolean; newBalance: number }>(
-    "/api/payment/admin-debit",
-    data
-  );
-}
-
-export async function initMonnifyPayment(data: { amount: number; userId: string; reference: string }) {
-  return callApi<{ checkoutUrl: string; transactionReference: string }>(
-    "/api/payment/init-monnify",
-    data
-  );
-}
-
-export async function verifyMonnifyPayment(data: { reference: string; userId: string }) {
-  return callApi<{ success: boolean; amount: number; alreadyCredited: boolean }>(
-    "/api/payment/verify-monnify",
-    data
-  );
+export async function adminDebitWalletFn(data: {
+  targetUserId: string;
+  amount: number;
+  description: string;
+}) {
+  return callApi<{ success: boolean; newBalance: number }>("/api/payment/admin-debit", data);
 }

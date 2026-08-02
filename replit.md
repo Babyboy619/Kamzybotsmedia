@@ -16,6 +16,7 @@ The `Start application` workflow runs `npm run dev` which starts both Vite (port
 ## Required Secrets
 
 Add these in Replit Secrets:
+
 - `SUPABASE_SERVICE_ROLE_KEY` — Supabase service role key (for server-side admin operations)
 - `PAYSTACK_SECRET_KEY` — Paystack secret key (for payment verification)
 - `NOWPAYMENTS_API_KEY` — NOWPayments API key (for crypto payments)

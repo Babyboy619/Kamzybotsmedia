@@ -59,8 +59,8 @@ export async function onRequestPost({ request, env }) {
 
   const file = formData.get("file");
   if (!file || typeof file === "string") return json({ error: "No file provided" }, 400);
-  if (!file.type.startsWith("image/"))    return json({ error: "Only image files are allowed" }, 400);
-  if (file.size > 5 * 1024 * 1024)        return json({ error: "Image must be 5 MB or smaller" }, 400);
+  if (!file.type.startsWith("image/")) return json({ error: "Only image files are allowed" }, 400);
+  if (file.size > 5 * 1024 * 1024) return json({ error: "Image must be 5 MB or smaller" }, 400);
 
   const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
   const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}.${ext}`;
@@ -89,7 +89,7 @@ export async function onRequestPost({ request, env }) {
         supabase: body,
         uploadUrl,
       },
-      uploadRes.status
+      uploadRes.status,
     );
   }
 

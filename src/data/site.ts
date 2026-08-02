@@ -84,6 +84,7 @@ export const contactInfo = {
   phoneRaw: "+2349035396464",
   whatsappSupport: "https://wa.me/2348159696814",
   whatsappGroup: "https://chat.whatsapp.com/EvXxgtIsxPiDsEGFQcMP9v",
+  whatsappNumber: "+2348159696814",
   telegramSupport: "https://t.me/Kamzybotsmedia",
   telegramChannel: "https://t.me/kamzybotsmedia01",
   location: "Nigeria",

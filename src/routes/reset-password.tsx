@@ -15,7 +15,9 @@ export default function ResetPasswordPage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY") setReady(true);
     });
     supabase.auth.getSession().then(({ data }) => {
@@ -60,13 +62,33 @@ export default function ResetPasswordPage() {
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="new-pw">New Password</Label>
-            <Input id="new-pw" type="password" autoComplete="new-password" placeholder="At least 8 characters" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            <Input
+              id="new-pw"
+              type="password"
+              autoComplete="new-password"
+              placeholder="At least 8 characters"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="confirm-pw">Confirm Password</Label>
-            <Input id="confirm-pw" type="password" autoComplete="new-password" placeholder="Repeat password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+            <Input
+              id="confirm-pw"
+              type="password"
+              autoComplete="new-password"
+              placeholder="Repeat password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              required
+            />
           </div>
-          <Button type="submit" disabled={loading} className="w-full bg-brand-orange hover:bg-brand-orange-hover text-white">
+          <Button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-brand-orange hover:bg-brand-orange-hover text-white"
+          >
             {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             Update Password
           </Button>

@@ -33,9 +33,7 @@ export function PageHero({ title, subtitle, breadcrumbs = [] }: PageHeroProps) {
           <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white tracking-tight mb-3">
             {title}
           </h1>
-          {subtitle && (
-            <p className="text-white/70 max-w-2xl mx-auto mb-5">{subtitle}</p>
-          )}
+          {subtitle && <p className="text-white/70 max-w-2xl mx-auto mb-5">{subtitle}</p>}
           {breadcrumbs.length > 0 && (
             <nav className="flex items-center justify-center gap-2 text-white/80 text-sm">
               <Link to="/" className="flex items-center gap-1 hover:text-white transition-colors">

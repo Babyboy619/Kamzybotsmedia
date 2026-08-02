@@ -2,10 +2,34 @@ import { motion } from "framer-motion";
 import { Facebook, Instagram, Twitter, Linkedin, Mail, Youtube } from "lucide-react";
 
 const icons = [
-  { Icon: Facebook, color: "text-blue-600", bg: "bg-blue-100", pos: "top-[10%] left-[5%]", delay: 0 },
-  { Icon: Instagram, color: "text-pink-600", bg: "bg-pink-100", pos: "top-[68%] left-[8%]", delay: 0.2 },
-  { Icon: Twitter, color: "text-sky-500", bg: "bg-sky-100", pos: "top-[15%] right-[8%]", delay: 0.4 },
-  { Icon: Linkedin, color: "text-blue-700", bg: "bg-blue-100", pos: "top-[75%] left-[22%]", delay: 0.6 },
+  {
+    Icon: Facebook,
+    color: "text-blue-600",
+    bg: "bg-blue-100",
+    pos: "top-[10%] left-[5%]",
+    delay: 0,
+  },
+  {
+    Icon: Instagram,
+    color: "text-pink-600",
+    bg: "bg-pink-100",
+    pos: "top-[68%] left-[8%]",
+    delay: 0.2,
+  },
+  {
+    Icon: Twitter,
+    color: "text-sky-500",
+    bg: "bg-sky-100",
+    pos: "top-[15%] right-[8%]",
+    delay: 0.4,
+  },
+  {
+    Icon: Linkedin,
+    color: "text-blue-700",
+    bg: "bg-blue-100",
+    pos: "top-[75%] left-[22%]",
+    delay: 0.6,
+  },
   { Icon: Mail, color: "text-red-500", bg: "bg-red-100", pos: "top-[22%] left-[14%]", delay: 0.8 },
   { Icon: Youtube, color: "text-red-600", bg: "bg-red-100", pos: "top-[62%] right-[6%]", delay: 1 },
 ];

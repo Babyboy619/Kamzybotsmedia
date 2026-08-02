@@ -27,7 +27,10 @@ export function AnnouncementBanner() {
   return (
     <div className="bg-brand-orange text-white">
       {visible.map((msg) => (
-        <div key={msg.id} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex items-start gap-3">
+        <div
+          key={msg.id}
+          className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex items-start gap-3"
+        >
           <Megaphone className="w-4 h-4 shrink-0 mt-0.5 opacity-90" />
           <div className="flex-1 min-w-0">
             <span className="font-semibold text-sm">{msg.title}:</span>{" "}

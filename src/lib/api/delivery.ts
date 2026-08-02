@@ -17,13 +17,15 @@ async function getToken(): Promise<string | null> {
 // Returns assigned:false gracefully if the function doesn't exist yet.
 async function claimViaRpc(orderId: string, productId: string): Promise<DeliveryResult> {
   try {
-    const { data, error } = await (supabase.rpc as unknown as (
-      fn: string,
-      args: Record<string, string>
-    ) => Promise<{ data: DeliveryResult | null; error: { message: string; code?: string } | null }>)(
-      "user_claim_credential",
-      { _order_id: orderId, _product_id: productId }
-    );
+    const { data, error } = await (
+      supabase.rpc as unknown as (
+        fn: string,
+        args: Record<string, string>,
+      ) => Promise<{
+        data: DeliveryResult | null;
+        error: { message: string; code?: string } | null;
+      }>
+    )("user_claim_credential", { _order_id: orderId, _product_id: productId });
     // PGRST202 = function not found — migration not applied yet, degrade gracefully
     if (error) {
       if (error.code === "PGRST202" || error.message?.includes("user_claim_credential")) {
@@ -38,9 +40,10 @@ async function claimViaRpc(orderId: string, productId: string): Promise<Delivery
   }
 }
 
-export async function assignCredentialToOrder(
-  data: { orderId: string; productId: string }
-): Promise<DeliveryResult> {
+export async function assignCredentialToOrder(data: {
+  orderId: string;
+  productId: string;
+}): Promise<DeliveryResult> {
   const token = await getToken();
 
   // 1. Try the Express server (needs SUPABASE_SERVICE_ROLE_KEY — works in production)

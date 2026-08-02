@@ -60,10 +60,16 @@ export default function BankTransferTopup({ userId }: { userId: string }) {
         <div className="text-2xl">✅</div>
         <p className="font-semibold text-green-800">Submitted Successfully</p>
         <p className="text-sm text-green-700">
-          Your payment is under review. Your wallet will be credited once verified (usually within a few minutes).
+          Your payment is under review. Your wallet will be credited once verified (usually within a
+          few minutes).
         </p>
         <button
-          onClick={() => { setSubmitted(false); setAmount(""); setReference(""); setSenderName(""); }}
+          onClick={() => {
+            setSubmitted(false);
+            setAmount("");
+            setReference("");
+            setSenderName("");
+          }}
           className="mt-2 text-xs text-green-600 underline"
         >
           Submit another
@@ -76,7 +82,9 @@ export default function BankTransferTopup({ userId }: { userId: string }) {
     <div className="space-y-4">
       {/* Bank Details Card */}
       <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 space-y-3">
-        <p className="text-sm font-semibold text-orange-800 uppercase tracking-wide">Transfer to this account</p>
+        <p className="text-sm font-semibold text-orange-800 uppercase tracking-wide">
+          Transfer to this account
+        </p>
         <div className="space-y-2">
           <div className="flex justify-between items-center">
             <span className="text-xs text-gray-500">Bank</span>
@@ -85,9 +93,14 @@ export default function BankTransferTopup({ userId }: { userId: string }) {
           <div className="flex justify-between items-center">
             <span className="text-xs text-gray-500">Account Number</span>
             <div className="flex items-center gap-2">
-              <span className="font-bold text-lg tracking-widest text-gray-900">{BANK_DETAILS.accountNumber}</span>
+              <span className="font-bold text-lg tracking-widest text-gray-900">
+                {BANK_DETAILS.accountNumber}
+              </span>
               <button
-                onClick={() => { navigator.clipboard.writeText(BANK_DETAILS.accountNumber); toast.success("Copied!"); }}
+                onClick={() => {
+                  navigator.clipboard.writeText(BANK_DETAILS.accountNumber);
+                  toast.success("Copied!");
+                }}
                 className="text-xs bg-orange-200 text-orange-800 px-2 py-0.5 rounded-full"
               >
                 Copy
@@ -100,39 +113,46 @@ export default function BankTransferTopup({ userId }: { userId: string }) {
           </div>
         </div>
         <p className="text-xs text-orange-700 bg-orange-100 rounded-lg p-2">
-          ⚠️ After transferring, fill the form below with your payment details so we can verify and credit your wallet.
+          ⚠️ After transferring, fill the form below with your payment details so we can verify and
+          credit your wallet.
         </p>
       </div>
 
       {/* Submission Form */}
       <div className="space-y-3">
         <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">Amount Transferred (₦)</label>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">
+            Amount Transferred (₦)
+          </label>
           <input
             type="number"
             placeholder="e.g. 5000"
             value={amount}
-            onChange={e => setAmount(e.target.value)}
+            onChange={(e) => setAmount(e.target.value)}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
           />
         </div>
         <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">Your Name (as it appears on transfer)</label>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">
+            Your Name (as it appears on transfer)
+          </label>
           <input
             type="text"
             placeholder="e.g. John Doe"
             value={senderName}
-            onChange={e => setSenderName(e.target.value)}
+            onChange={(e) => setSenderName(e.target.value)}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
           />
         </div>
         <div>
-          <label className="text-xs font-medium text-gray-600 mb-1 block">Transfer Reference / Session ID</label>
+          <label className="text-xs font-medium text-gray-600 mb-1 block">
+            Transfer Reference / Session ID
+          </label>
           <input
             type="text"
             placeholder="From your bank app receipt"
             value={reference}
-            onChange={e => setReference(e.target.value)}
+            onChange={(e) => setReference(e.target.value)}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
           />
         </div>

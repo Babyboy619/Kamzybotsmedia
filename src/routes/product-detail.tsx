@@ -1,25 +1,16 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { Loader2, ArrowLeft, ShoppingCart, Heart, Minus, Plus } from "lucide-react";
+import { Loader2, ArrowLeft, Minus, Plus, ShoppingCart, Heart } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import MarketplaceChat from "@/components/marketplace/MarketplaceChat";
+import { getExternalLog, purchaseExternalLog, type ExternalLogProduct } from "@/lib/api/logs";
 
-type Product = { 
-  id: string; 
-  title: string; 
-  price: number; 
-  stock: number; 
-  description: string | null; 
-  image_url: string | null; 
-  slug: string; 
-  currency: string;
-  category_id: string;
-};
+type Product = ExternalLogProduct;
+type ProductWithSeller = Product & { user_id?: string | null; seller_id?: string | null };
 
 export default function ProductDetailPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -36,22 +27,22 @@ export default function ProductDetailPage() {
   }, [slug]);
 
   const fetchProduct = async () => {
+    if (!slug) return;
     setLoading(true);
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .eq("slug", slug)
-      .eq("published", true)
-      .single();
-
-    if (error || !data) {
-      toast.error("Product not found");
+    try {
+      const log = await getExternalLog(slug);
+      if (!log) {
+        toast.error("Product not found");
+        navigate("/products");
+        return;
+      }
+      setProduct(log);
+    } catch {
+      toast.error("Unable to load product");
       navigate("/products");
-      return;
+    } finally {
+      setLoading(false);
     }
-
-    setProduct(data as Product);
-    setLoading(false);
   };
 
   const handleQuantityChange = (value: number) => {
@@ -73,48 +64,13 @@ export default function ProductDetailPage() {
     setPurchasing(true);
 
     try {
-      // Check user profile suspension status
-      const { data: profile } = await supabase.from("profiles").select("suspended").eq("id", user.id).single();
-      if (profile?.suspended) {
-        toast.error("Your account has been suspended. Contact support.");
-        setPurchasing(false);
-        return;
-      }
-      // Process purchase for each unit
-      for (let i = 0; i < quantity; i++) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { data: orderId, error } = await (supabase.rpc as any)("purchase_with_wallet", {
-          _user_id: user.id,
-          _product_id: product.id,
-          _quantity: 1,
-        });
-
-        if (error) {
-          console.error("[Buy] purchase_with_wallet error:", error);
-          const msg = (error.message || '').toLowerCase();
-          if (msg.includes('insufficient wallet balance')) {
-            toast.error('Insufficient wallet balance. Please fund your wallet.');
-          } else if (msg.includes('product is currently out of stock')) {
-            toast.error('Product is currently out of stock.');
-          } else {
-            toast.error(error.message || "Purchase failed. Please try again.");
-          }
-          setPurchasing(false);
-          return;
-        }
-
-        if (!orderId) {
-          toast.error("Purchase failed — no order ID returned. Please contact support.");
-          setPurchasing(false);
-          return;
-        }
-      }
-
-      toast.success(`Successfully purchased ${quantity} ${quantity === 1 ? 'item' : 'items'}!`);
+      const result = await purchaseExternalLog({ slug: product.slug, quantity });
+      toast.success(`Successfully purchased ${quantity} ${quantity === 1 ? "item" : "items"}!`);
       navigate("/orders");
+      console.info("External log purchase completed", result);
     } catch (err) {
       console.error("[Buy] error:", err);
-      toast.error("An error occurred during purchase");
+      toast.error(err instanceof Error ? err.message : "An error occurred during purchase");
       setPurchasing(false);
     }
   };
@@ -146,11 +102,7 @@ export default function ProductDetailPage() {
     <div className="w-full bg-background py-12 md:py-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Back Button */}
-        <Button
-          variant="ghost"
-          onClick={() => navigate("/products")}
-          className="mb-8"
-        >
+        <Button variant="ghost" onClick={() => navigate("/products")} className="mb-8">
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back to Products
         </Button>
@@ -182,9 +134,7 @@ export default function ProductDetailPage() {
                 {isOutOfStock ? (
                   <Badge className="bg-red-100 text-red-700">Out of Stock</Badge>
                 ) : product.stock < 5 ? (
-                  <Badge className="bg-yellow-100 text-yellow-700">
-                    Only {product.stock} left
-                  </Badge>
+                  <Badge className="bg-yellow-100 text-yellow-700">Only {product.stock} left</Badge>
                 ) : (
                   <Badge className="bg-green-100 text-green-700">In Stock</Badge>
                 )}
@@ -267,18 +217,20 @@ export default function ProductDetailPage() {
                 )}
                 {purchasing ? "Processing..." : "Buy Now"}
               </Button>
-              <Button
-                variant="outline"
-                size="lg"
-                className="h-12"
-                disabled={isOutOfStock}
-              >
+              <Button variant="outline" size="lg" className="h-12" disabled={isOutOfStock}>
                 <Heart className="w-5 h-5" />
               </Button>
             </div>
 
             {/* Additional Info */}
-            <MarketplaceChat productId={product.id} sellerId={(product as any).user_id || (product as any).seller_id || null} />
+            <MarketplaceChat
+              productId={product.id}
+              sellerId={
+                (product as ProductWithSeller).user_id ??
+                (product as ProductWithSeller).seller_id ??
+                null
+              }
+            />
 
             <div className="border-t pt-6 space-y-3 text-sm text-muted-foreground">
               <div className="flex justify-between">

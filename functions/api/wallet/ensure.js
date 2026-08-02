@@ -3,7 +3,7 @@
 
 export async function onRequestPost({ request, env }) {
   const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
-  const serviceKey  = env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || "";
 
   if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
 
@@ -16,8 +16,11 @@ export async function onRequestPost({ request, env }) {
   if (!user) return json({ error: "Unauthorized" }, 401);
 
   // Check existing wallet
-  const walletRes = await sbFetch(supabaseUrl, serviceKey,
-    `/rest/v1/wallets?user_id=eq.${user.id}&limit=1`);
+  const walletRes = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/wallets?user_id=eq.${user.id}&limit=1`,
+  );
   const wallets = await walletRes.json();
   if (wallets.length > 0) return json({ wallet: wallets[0] });
 

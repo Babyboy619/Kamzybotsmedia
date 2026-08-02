@@ -2,8 +2,8 @@
 
 export async function onRequestPost({ request, env }) {
   const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
-  const serviceKey  = env.SUPABASE_SERVICE_ROLE_KEY || "";
-  const nowKey      = env.NOWPAYMENTS_API_KEY || "";
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const nowKey = env.NOWPAYMENTS_API_KEY || "";
 
   if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
 
@@ -14,12 +14,15 @@ export async function onRequestPost({ request, env }) {
 
   const { reference, userId } = await request.json();
   if (!reference || !userId) return json({ error: "reference and userId required" }, 400);
-  if (userId !== user.id)    return json({ error: "Forbidden" }, 403);
+  if (userId !== user.id) return json({ error: "Forbidden" }, 403);
 
-  const intentRes = await sbFetch(supabaseUrl, serviceKey,
-    `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(reference)}&user_id=eq.${userId}&limit=1`);
+  const intentRes = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(reference)}&user_id=eq.${userId}&limit=1`,
+  );
   const intents = await intentRes.json();
-  const intent  = intents[0];
+  const intent = intents[0];
   if (!intent) return json({ error: "Payment intent not found" }, 404);
   if (intent.status === "success") return json({ status: "success", alreadyCredited: true });
 
@@ -27,7 +30,7 @@ export async function onRequestPost({ request, env }) {
 
   const nowRes = await fetch(
     `https://api.nowpayments.io/v1/payment?order_id=${encodeURIComponent(reference)}&limit=1`,
-    { headers: { "x-api-key": nowKey } }
+    { headers: { "x-api-key": nowKey } },
   );
   if (!nowRes.ok) return json({ error: "Failed to check payment status" }, 502);
 
@@ -40,14 +43,15 @@ export async function onRequestPost({ request, env }) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        _user_id: userId, _amount: Number(intent.amount),
-        _provider: "nowpayments", _reference: reference,
+        _user_id: userId,
+        _amount: Number(intent.amount),
+        _provider: "nowpayments",
+        _reference: reference,
         _description: "Wallet funded via NOWPayments (crypto)",
       }),
     });
     if (rpcRes.ok) {
-      await sbFetch(supabaseUrl, serviceKey,
-        `/rest/v1/payment_intents?id=eq.${intent.id}`, {
+      await sbFetch(supabaseUrl, serviceKey, `/rest/v1/payment_intents?id=eq.${intent.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
         body: JSON.stringify({ status: "success", updated_at: new Date().toISOString() }),
@@ -66,7 +70,11 @@ async function getUser(supabaseUrl, serviceKey, token) {
 }
 
 async function ensureWallet(supabaseUrl, serviceKey, userId) {
-  const res = await sbFetch(supabaseUrl, serviceKey, `/rest/v1/wallets?user_id=eq.${userId}&limit=1`);
+  const res = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/wallets?user_id=eq.${userId}&limit=1`,
+  );
   const rows = await res.json();
   if (rows.length > 0) return rows[0];
   const cr = await sbFetch(supabaseUrl, serviceKey, "/rest/v1/wallets", {

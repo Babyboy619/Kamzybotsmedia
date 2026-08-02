@@ -7,7 +7,10 @@ type SignInOptions = {
 
 export const lovable = {
   auth: {
-    signInWithOAuth: async (provider: "google" | "apple" | "microsoft" | "lovable", opts?: SignInOptions) => {
+    signInWithOAuth: async (
+      provider: "google" | "apple" | "microsoft" | "lovable",
+      opts?: SignInOptions,
+    ) => {
       if (provider !== "google") {
         return { error: new Error(`OAuth provider '${provider}' is not supported`) };
       }

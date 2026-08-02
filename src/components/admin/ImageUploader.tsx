@@ -48,9 +48,9 @@ export function ImageUploader({
 
       setProgress(90);
 
-      const { data: { publicUrl } } = supabase.storage
-        .from(BUCKET)
-        .getPublicUrl(data.path);
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from(BUCKET).getPublicUrl(data.path);
 
       setProgress(100);
       onChange(publicUrl);
@@ -79,7 +79,11 @@ export function ImageUploader({
   if (value) {
     return (
       <div className="mt-1 relative inline-block group">
-        <img src={value} alt="Product" className="w-full max-w-xs h-40 object-cover rounded-lg border border-border" />
+        <img
+          src={value}
+          alt="Product"
+          className="w-full max-w-xs h-40 object-cover rounded-lg border border-border"
+        />
         <Button
           type="button"
           variant="destructive"
@@ -96,12 +100,17 @@ export function ImageUploader({
 
   return (
     <div
-      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
       onDragLeave={() => setDragOver(false)}
       onDrop={onDrop}
       onClick={() => !uploading && inputRef.current?.click()}
       className={`mt-1 border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
-        dragOver ? "border-brand-orange bg-brand-orange/5" : "border-border hover:border-brand-orange/60"
+        dragOver
+          ? "border-brand-orange bg-brand-orange/5"
+          : "border-border hover:border-brand-orange/60"
       } ${uploading ? "pointer-events-none opacity-70" : ""}`}
     >
       <input ref={inputRef} type="file" accept={ACCEPT} onChange={onPick} className="hidden" />
@@ -109,7 +118,10 @@ export function ImageUploader({
         <div className="flex flex-col items-center gap-2">
           <Loader2 className="w-6 h-6 text-brand-orange animate-spin" />
           <div className="w-full max-w-xs h-1.5 bg-muted rounded-full overflow-hidden">
-            <div className="h-full bg-brand-orange transition-all" style={{ width: `${progress}%` }} />
+            <div
+              className="h-full bg-brand-orange transition-all"
+              style={{ width: `${progress}%` }}
+            />
           </div>
           <p className="text-xs text-muted-foreground">Uploading…</p>
         </div>

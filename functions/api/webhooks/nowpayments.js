@@ -17,12 +17,12 @@ export async function onRequestPost({ request, env }) {
   const ipnSecret = monnifySecret || nowSecret || "";
   const provider = monnifySecret ? "monnify" : nowSecret ? "nowpayments" : "";
 
-  if (!supabaseUrl || !serviceKey)
-    return json({ error: "Server not configured" }, 503);
+  if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
 
   // Read raw body first — needed for signature verification
   const body = await request.text();
-  const signature = request.headers.get(provider === "monnify" ? "x-monnify-sig" : "x-nowpayments-sig") || "";
+  const signature =
+    request.headers.get(provider === "monnify" ? "x-monnify-sig" : "x-nowpayments-sig") || "";
 
   // Verify signature (uses NOWPayments-style HMAC verification function).
   if (ipnSecret) {
@@ -33,11 +33,17 @@ export async function onRequestPost({ request, env }) {
     }
   } else {
     // IPN secret not configured — warn but proceed (idempotent checks will protect duplicates)
-    console.warn(`[${provider || "payment provider"} webhook] IPN secret not set — skipping signature check`);
+    console.warn(
+      `[${provider || "payment provider"} webhook] IPN secret not set — skipping signature check`,
+    );
   }
 
   let event;
-  try { event = JSON.parse(body); } catch { return json({ error: "Bad JSON" }, 400); }
+  try {
+    event = JSON.parse(body);
+  } catch {
+    return json({ error: "Bad JSON" }, 400);
+  }
 
   const { payment_status, order_id: reference, price_amount, actually_paid } = event;
 
@@ -53,10 +59,10 @@ export async function onRequestPost({ request, env }) {
   const intentRes = await sbFetch(
     supabaseUrl,
     serviceKey,
-    `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(reference)}&provider=eq.${provider}&limit=1`
+    `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(reference)}&provider=eq.${provider}&limit=1`,
   );
   const intents = await intentRes.json();
-  const intent  = intents[0];
+  const intent = intents[0];
 
   if (intent?.status === "success") {
     return json({ received: true, alreadyCredited: true });
@@ -65,7 +71,10 @@ export async function onRequestPost({ request, env }) {
   // Determine user — from payment_intent record or metadata
   const userId = intent?.user_id ?? event.order_description_metadata?.userId ?? null;
   if (!userId) {
-    console.error(`[${provider || "payment provider"} webhook] Cannot resolve userId for reference:`, reference);
+    console.error(
+      `[${provider || "payment provider"} webhook] Cannot resolve userId for reference:`,
+      reference,
+    );
     return json({ received: true }); // 200 so provider doesn't retry
   }
 
@@ -118,7 +127,9 @@ export async function onRequestPost({ request, env }) {
     });
   }
 
-  console.log(`[${provider || "NOWPayments"} webhook] Credited ₦${amount} → user ${userId} (ref: ${reference})`);
+  console.log(
+    `[${provider || "NOWPayments"} webhook] Credited ₦${amount} → user ${userId} (ref: ${reference})`,
+  );
   return json({ received: true, credited: true });
 }
 
@@ -131,13 +142,16 @@ async function verifyNowSignature(body, signature, secret) {
     const sortedJson = JSON.stringify(deepSortKeys(parsed));
     const enc = new TextEncoder();
     const key = await crypto.subtle.importKey(
-      "raw", enc.encode(secret),
+      "raw",
+      enc.encode(secret),
       { name: "HMAC", hash: "SHA-512" },
-      false, ["sign"]
+      false,
+      ["sign"],
     );
-    const sigBuf  = await crypto.subtle.sign("HMAC", key, enc.encode(sortedJson));
+    const sigBuf = await crypto.subtle.sign("HMAC", key, enc.encode(sortedJson));
     const computed = Array.from(new Uint8Array(sigBuf))
-      .map((b) => b.toString(16).padStart(2, "0")).join("");
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
     return computed === signature.toLowerCase();
   } catch {
     return false;
@@ -149,12 +163,16 @@ function deepSortKeys(obj) {
   return Object.fromEntries(
     Object.entries(obj)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, v]) => [k, deepSortKeys(v)])
+      .map(([k, v]) => [k, deepSortKeys(v)]),
   );
 }
 
 async function ensureWallet(supabaseUrl, serviceKey, userId) {
-  const res  = await sbFetch(supabaseUrl, serviceKey, `/rest/v1/wallets?user_id=eq.${userId}&limit=1`);
+  const res = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/wallets?user_id=eq.${userId}&limit=1`,
+  );
   const rows = await res.json();
   if (rows.length > 0) return rows[0];
   const cr = await sbFetch(supabaseUrl, serviceKey, "/rest/v1/wallets", {

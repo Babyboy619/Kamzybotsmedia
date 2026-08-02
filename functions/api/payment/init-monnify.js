@@ -2,15 +2,14 @@
 // Initializes a Monnify transaction and returns a checkout URL.
 
 export async function onRequestPost({ request, env }) {
-  const supabaseUrl  = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
-  const serviceKey   = env.SUPABASE_SERVICE_ROLE_KEY || "";
-  const apiKey       = env.MONNIFY_API_KEY || "";
-  const secretKey    = env.MONNIFY_SECRET_KEY || "";
+  const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const apiKey = env.MONNIFY_API_KEY || "";
+  const secretKey = env.MONNIFY_SECRET_KEY || "";
   const contractCode = env.MONNIFY_CONTRACT_CODE || "";
-  const baseUrl      = env.MONNIFY_BASE_URL || "https://api.monnify.com";
+  const baseUrl = env.MONNIFY_BASE_URL || "https://api.monnify.com";
 
-  if (!supabaseUrl || !serviceKey)
-    return json({ error: "Server not configured" }, 503);
+  if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
   if (!apiKey || !secretKey || !contractCode)
     return json({ error: "Monnify is not configured — contact admin" }, 500);
 
@@ -25,8 +24,7 @@ export async function onRequestPost({ request, env }) {
 
   if (!amount || !userId || !reference)
     return json({ error: "amount, userId and reference are required" }, 400);
-  if (userId !== user.id)
-    return json({ error: "Forbidden" }, 403);
+  if (userId !== user.id) return json({ error: "Forbidden" }, 403);
 
   // Get Monnify access token
   const credentials = btoa(`${apiKey}:${secretKey}`);
@@ -70,8 +68,7 @@ export async function onRequestPost({ request, env }) {
   const checkoutUrl = initData?.responseBody?.checkoutUrl;
   const transactionRef = initData?.responseBody?.transactionReference;
 
-  if (!checkoutUrl)
-    return json({ error: "Monnify did not return a checkout URL" }, 502);
+  if (!checkoutUrl) return json({ error: "Monnify did not return a checkout URL" }, 502);
 
   // Save payment_intent with monnify transaction ref in raw
   await sbFetch(supabaseUrl, serviceKey, "/rest/v1/payment_intents", {

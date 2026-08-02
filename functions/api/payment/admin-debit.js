@@ -2,7 +2,7 @@
 
 export async function onRequestPost({ request, env }) {
   const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
-  const serviceKey  = env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || "";
   if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
 
   const auth = request.headers.get("Authorization") || "";
@@ -10,8 +10,11 @@ export async function onRequestPost({ request, env }) {
   const user = await getUser(supabaseUrl, serviceKey, auth.slice(7));
   if (!user) return json({ error: "Unauthorized" }, 401);
 
-  const rolesRes = await sbFetch(supabaseUrl, serviceKey,
-    `/rest/v1/user_roles?user_id=eq.${user.id}&role=eq.admin&limit=1`);
+  const rolesRes = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/user_roles?user_id=eq.${user.id}&role=eq.admin&limit=1`,
+  );
   const roles = await rolesRes.json();
   if (!roles.length) return json({ error: "Forbidden: admin access required" }, 403);
 
@@ -20,8 +23,11 @@ export async function onRequestPost({ request, env }) {
     return json({ error: "targetUserId, amount and description required" }, 400);
 
   // Fetch wallet
-  const wRes = await sbFetch(supabaseUrl, serviceKey,
-    `/rest/v1/wallets?user_id=eq.${targetUserId}&limit=1`);
+  const wRes = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/wallets?user_id=eq.${targetUserId}&limit=1`,
+  );
   const wallets = await wRes.json();
   if (!wallets.length) return json({ error: "Wallet not found for this user" }, 404);
 
@@ -30,15 +36,14 @@ export async function onRequestPost({ request, env }) {
     return json({ error: `Insufficient balance. Current: ₦${wallet.balance}` }, 400);
 
   const newBalance = Number(wallet.balance) - Number(amount);
-  const ref = `admin-debit-${Date.now()}-${Math.random().toString(36).substring(2,9)}`;
+  const ref = `admin-debit-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
   // Update wallet balance
-  const updateRes = await sbFetch(supabaseUrl, serviceKey,
-    `/rest/v1/wallets?id=eq.${wallet.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
-      body: JSON.stringify({ balance: newBalance, updated_at: new Date().toISOString() }),
-    });
+  const updateRes = await sbFetch(supabaseUrl, serviceKey, `/rest/v1/wallets?id=eq.${wallet.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
+    body: JSON.stringify({ balance: newBalance, updated_at: new Date().toISOString() }),
+  });
   if (!updateRes.ok) {
     const msg = await updateRes.text();
     return json({ error: "Failed to update wallet: " + msg }, 500);
@@ -49,10 +54,14 @@ export async function onRequestPost({ request, env }) {
     method: "POST",
     headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
     body: JSON.stringify({
-      wallet_id: wallet.id, user_id: targetUserId,
-      type: "debit", amount: Number(amount),
-      balance_after: newBalance, status: "success",
-      provider: "manual", reference: ref,
+      wallet_id: wallet.id,
+      user_id: targetUserId,
+      type: "debit",
+      amount: Number(amount),
+      balance_after: newBalance,
+      status: "success",
+      provider: "manual",
+      reference: ref,
       description: description,
     }),
   });
@@ -62,8 +71,10 @@ export async function onRequestPost({ request, env }) {
     method: "POST",
     headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
     body: JSON.stringify({
-      actor_id: user.id, action: "admin_debit_wallet",
-      target: targetUserId, metadata: { amount, description, ref, new_balance: newBalance },
+      actor_id: user.id,
+      action: "admin_debit_wallet",
+      target: targetUserId,
+      metadata: { amount, description, ref, new_balance: newBalance },
     }),
   });
 

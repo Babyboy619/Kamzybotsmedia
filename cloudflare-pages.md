@@ -16,13 +16,13 @@ keep working**. This is NOT a static SPA deployment.
 
 When you create the Pages project, set:
 
-| Field                | Value                                    |
-| -------------------- | ---------------------------------------- |
-| Framework preset     | **None**                                 |
-| Build command        | `npm run build`                          |
-| Build output dir     | `dist`                                   |
-| Root directory       | (leave blank)                            |
-| Node.js version      | `20`                                     |
+| Field            | Value           |
+| ---------------- | --------------- |
+| Framework preset | **None**        |
+| Build command    | `npm run build` |
+| Build output dir | `dist`          |
+| Root directory   | (leave blank)   |
+| Node.js version  | `20`            |
 
 The TanStack build produces a Cloudflare-compatible Worker into `dist/` plus
 static assets. The `_worker.js` is loaded automatically by Cloudflare Pages.
@@ -40,6 +40,7 @@ In **Pages project → Settings → Environment variables**, add to both
 **Production** and **Preview**:
 
 ### Client-visible (Vite — bundled into the browser build)
+
 ```
 VITE_SUPABASE_URL=https://jerhefcpsmcvxkmvyyqe.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=<your supabase publishable key>
@@ -49,6 +50,7 @@ VITE_SITE_URL=https://yourdomain.com        # used for payment redirects
 ```
 
 ### Server-only (must NEVER be exposed to the browser)
+
 ```
 SUPABASE_URL=https://jerhefcpsmcvxkmvyyqe.supabase.co
 SUPABASE_PUBLISHABLE_KEY=<same publishable key>
@@ -69,7 +71,7 @@ After your first deploy you get a URL like
 - **Paystack callback URL**: not strictly needed — verification is done via
   `verifyPaystackPayment` server function after `PaystackPop.onSuccess`.
 - **NOWPayments success URL**: `https://<your-domain>/wallet?funded=crypto`
-- **NOWPayments cancel URL**:  `https://<your-domain>/wallet`
+- **NOWPayments cancel URL**: `https://<your-domain>/wallet`
   (Both are sent automatically by the server function from `VITE_SITE_URL`.)
 
 If you later add webhook-driven crediting, expose it under

@@ -8,10 +8,12 @@ description: How auto-push/pull to GitHub is set up for KAMZYBOT'S MEDIA on Repl
 **Auth:** PAT stored as Replit secret `GITHUB_PAT` — embedded in remote URL at push time, never written to any file.
 
 **Scripts:**
+
 - `scripts/push-to-github.sh` — clears stale `.git/*.lock` files, sets remote URL with PAT, stages all changes, commits with timestamp, pulls, then pushes to main.
 - `scripts/pull-from-github.sh` — same lock cleanup, sets remote, pulls from main.
 
 **Workflows (manual, autoStart=false):**
+
 - "Push to GitHub" → `bash scripts/push-to-github.sh`
 - "Pull from GitHub" → `bash scripts/pull-from-github.sh`
 

@@ -21,14 +21,18 @@ export default function BlogPage() {
             transition={{ duration: 0.5 }}
             className="text-center mb-12"
           >
-            <h2 className="text-3xl md:text-4xl font-bold text-brand-navy mb-3 tracking-tight">Latest articles</h2>
+            <h2 className="text-3xl md:text-4xl font-bold text-brand-navy mb-3 tracking-tight">
+              Latest articles
+            </h2>
             <p className="text-muted-foreground max-w-2xl mx-auto">
               Stay updated with the latest tips and insights about social media marketing.
             </p>
           </motion.div>
 
           {blogs.length === 0 ? (
-            <div className="text-center py-16 text-muted-foreground">No articles available yet.</div>
+            <div className="text-center py-16 text-muted-foreground">
+              No articles available yet.
+            </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
               {blogs.map((blog, index) => (
@@ -53,8 +57,12 @@ export default function BlogPage() {
                       <Calendar className="w-4 h-4" />
                       <span>{blog.date}</span>
                     </div>
-                    <h3 className="text-lg font-semibold text-brand-navy mb-3 line-clamp-2">{blog.title}</h3>
-                    <p className="text-muted-foreground text-sm mb-4 line-clamp-3">{blog.excerpt}</p>
+                    <h3 className="text-lg font-semibold text-brand-navy mb-3 line-clamp-2">
+                      {blog.title}
+                    </h3>
+                    <p className="text-muted-foreground text-sm mb-4 line-clamp-3">
+                      {blog.excerpt}
+                    </p>
                     <button
                       type="button"
                       className="inline-flex items-center gap-2 text-brand-orange hover:text-brand-orange-hover font-medium text-sm transition-colors"

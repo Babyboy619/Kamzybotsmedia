@@ -2,11 +2,11 @@
 // Verifies a Monnify payment after redirect and credits the wallet.
 
 export async function onRequestPost({ request, env }) {
-  const supabaseUrl  = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
-  const serviceKey   = env.SUPABASE_SERVICE_ROLE_KEY || "";
-  const apiKey       = env.MONNIFY_API_KEY || "";
-  const secretKey    = env.MONNIFY_SECRET_KEY || "";
-  const baseUrl      = env.MONNIFY_BASE_URL || "https://api.monnify.com";
+  const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const apiKey = env.MONNIFY_API_KEY || "";
+  const secretKey = env.MONNIFY_SECRET_KEY || "";
+  const baseUrl = env.MONNIFY_BASE_URL || "https://api.monnify.com";
 
   if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
   if (!apiKey || !secretKey) return json({ error: "Monnify not configured" }, 500);
@@ -22,8 +22,11 @@ export async function onRequestPost({ request, env }) {
   if (userId !== user.id) return json({ error: "Forbidden" }, 403);
 
   // Idempotency check
-  const intentRes = await sbFetch(supabaseUrl, serviceKey,
-    `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(reference)}&user_id=eq.${userId}&provider=eq.monnify&limit=1`);
+  const intentRes = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(reference)}&user_id=eq.${userId}&provider=eq.monnify&limit=1`,
+  );
   const intents = intentRes.ok ? await intentRes.json() : [];
   const intent = intents[0];
   if (intent?.status === "success")
@@ -41,17 +44,21 @@ export async function onRequestPost({ request, env }) {
   if (!accessToken) return json({ error: "Could not get Monnify access token" }, 502);
 
   // Verify transaction status
-  const verifyRes = await fetch(
-    `${baseUrl}/api/v2/transactions/${encodeURIComponent(reference)}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
+  const verifyRes = await fetch(`${baseUrl}/api/v2/transactions/${encodeURIComponent(reference)}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 
   if (!verifyRes.ok) return json({ error: "Could not reach Monnify — try again" }, 502);
   const verifyData = await verifyRes.json();
   const txStatus = verifyData?.responseBody?.paymentStatus;
 
   if (txStatus !== "PAID" && txStatus !== "OVERPAID")
-    return json({ error: `Payment not confirmed (status: ${txStatus || "unknown"}). If charged, contact support.` }, 400);
+    return json(
+      {
+        error: `Payment not confirmed (status: ${txStatus || "unknown"}). If charged, contact support.`,
+      },
+      400,
+    );
 
   const amount = Number(verifyData.responseBody.amountPaid ?? verifyData.responseBody.amount ?? 0);
 
@@ -63,10 +70,10 @@ export async function onRequestPost({ request, env }) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      _user_id:     userId,
-      _amount:      amount,
-      _provider:    "monnify",
-      _reference:   reference,
+      _user_id: userId,
+      _amount: amount,
+      _provider: "monnify",
+      _reference: reference,
       _description: `Wallet funded via Monnify (₦${amount.toLocaleString("en-NG")})`,
     }),
   });
@@ -79,8 +86,7 @@ export async function onRequestPost({ request, env }) {
 
   // Update payment_intent to success
   if (intent) {
-    await sbFetch(supabaseUrl, serviceKey,
-      `/rest/v1/payment_intents?id=eq.${intent.id}`, {
+    await sbFetch(supabaseUrl, serviceKey, `/rest/v1/payment_intents?id=eq.${intent.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
       body: JSON.stringify({ status: "success", updated_at: new Date().toISOString() }),
@@ -90,8 +96,12 @@ export async function onRequestPost({ request, env }) {
       method: "POST",
       headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
       body: JSON.stringify({
-        user_id: userId, provider: "monnify", reference,
-        amount, currency: "NGN", status: "success",
+        user_id: userId,
+        provider: "monnify",
+        reference,
+        amount,
+        currency: "NGN",
+        status: "success",
         updated_at: new Date().toISOString(),
       }),
     });
@@ -108,7 +118,11 @@ async function getUser(supabaseUrl, serviceKey, token) {
 }
 
 async function ensureWallet(supabaseUrl, serviceKey, userId) {
-  const res = await sbFetch(supabaseUrl, serviceKey, `/rest/v1/wallets?user_id=eq.${userId}&limit=1`);
+  const res = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/wallets?user_id=eq.${userId}&limit=1`,
+  );
   const rows = res.ok ? await res.json() : [];
   if (rows.length > 0) return rows[0];
   const cr = await sbFetch(supabaseUrl, serviceKey, "/rest/v1/wallets", {

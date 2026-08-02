@@ -24,14 +24,15 @@ export async function onRequestPost({ request, env }) {
   if (!user) return json({ error: "Unauthorized" }, 401);
 
   const { amount, userId, reference } = await request.json();
-  if (!amount || !userId || !reference) return json({ error: "amount, userId and reference required" }, 400);
+  if (!amount || !userId || !reference)
+    return json({ error: "amount, userId and reference required" }, 400);
   if (userId !== user.id) return json({ error: "Forbidden" }, 403);
 
   // Verify intent exists (use detected provider)
   const intentRes = await sbFetch(
     supabaseUrl,
     serviceKey,
-    `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(reference)}&user_id=eq.${userId}&provider=eq.${provider}&limit=1`
+    `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(reference)}&user_id=eq.${userId}&provider=eq.${provider}&limit=1`,
   );
   const intents = await intentRes.json();
   if (!intents[0]) return json({ error: "Invalid payment reference" }, 400);
@@ -39,7 +40,8 @@ export async function onRequestPost({ request, env }) {
   const siteUrl = env.SITE_URL || "https://kamzybotsmedia.com";
 
   // Choose API endpoint: NOWPayments (default) or MONIFY_API_URL (if using Monify)
-  const apiUrl = provider === "nowpayments" ? "https://api.nowpayments.io/v1/invoice" : env.MONIFY_API_URL || "";
+  const apiUrl =
+    provider === "nowpayments" ? "https://api.nowpayments.io/v1/invoice" : env.MONIFY_API_URL || "";
 
   if (provider === "monify" && !apiUrl) {
     return json({ error: "Monify configured but MONIFY_API_URL is missing" }, 501);
@@ -65,7 +67,10 @@ export async function onRequestPost({ request, env }) {
   const invoice = await res.json();
 
   // Response shape may vary between providers; attempt common fields
-  return json({ invoiceUrl: invoice.invoice_url || invoice.payment_url || invoice.url, invoiceId: invoice.id || invoice.payment_id || null });
+  return json({
+    invoiceUrl: invoice.invoice_url || invoice.payment_url || invoice.url,
+    invoiceId: invoice.id || invoice.payment_id || null,
+  });
 }
 
 async function getUser(supabaseUrl, serviceKey, token) {

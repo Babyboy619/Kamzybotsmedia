@@ -2,7 +2,7 @@
 
 export async function onRequestPost({ request, env }) {
   const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
-  const serviceKey  = env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || "";
 
   if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
 
@@ -12,8 +12,11 @@ export async function onRequestPost({ request, env }) {
   if (!user) return json({ error: "Unauthorized" }, 401);
 
   // Check admin role
-  const rolesRes = await sbFetch(supabaseUrl, serviceKey,
-    `/rest/v1/user_roles?user_id=eq.${user.id}&role=eq.admin&limit=1`);
+  const rolesRes = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/user_roles?user_id=eq.${user.id}&role=eq.admin&limit=1`,
+  );
   const roles = await rolesRes.json();
   if (!roles.length) return json({ error: "Forbidden: admin access required" }, 403);
 
@@ -29,8 +32,11 @@ export async function onRequestPost({ request, env }) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      _user_id: targetUserId, _amount: amount,
-      _provider: "manual", _reference: ref, _description: description,
+      _user_id: targetUserId,
+      _amount: amount,
+      _provider: "manual",
+      _reference: ref,
+      _description: description,
     }),
   });
   if (!rpcRes.ok) {
@@ -42,8 +48,10 @@ export async function onRequestPost({ request, env }) {
     method: "POST",
     headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
     body: JSON.stringify({
-      actor_id: user.id, action: "admin_credit_wallet",
-      target: targetUserId, metadata: { amount, description, ref },
+      actor_id: user.id,
+      action: "admin_credit_wallet",
+      target: targetUserId,
+      metadata: { amount, description, ref },
     }),
   });
 
@@ -58,7 +66,11 @@ async function getUser(supabaseUrl, serviceKey, token) {
 }
 
 async function ensureWallet(supabaseUrl, serviceKey, userId) {
-  const res = await sbFetch(supabaseUrl, serviceKey, `/rest/v1/wallets?user_id=eq.${userId}&limit=1`);
+  const res = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/wallets?user_id=eq.${userId}&limit=1`,
+  );
   const rows = await res.json();
   if (rows.length > 0) return rows[0];
   const cr = await sbFetch(supabaseUrl, serviceKey, "/rest/v1/wallets", {

@@ -9,22 +9,25 @@
 
 export async function onRequestPost({ request, env }) {
   const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || "";
-  const serviceKey  = env.SUPABASE_SERVICE_ROLE_KEY || "";
-  const secretKey   = env.OPAY_SECRET_KEY || "";
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const secretKey = env.OPAY_SECRET_KEY || "";
 
   if (!supabaseUrl || !serviceKey || !secretKey)
     return json({ error: "Server not configured" }, 503);
 
   const rawBody = await request.text();
   let payload;
-  try { payload = JSON.parse(rawBody); } catch { return json({ error: "Bad JSON" }, 400); }
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    return json({ error: "Bad JSON" }, 400);
+  }
 
   const { payload: data, sha512: providedSig } = payload;
   if (!data) return json({ error: "Missing payload" }, 400);
 
   const expectedSig = await hmacSha512Hex(secretKey, JSON.stringify(data));
-  if (!providedSig || expectedSig !== providedSig)
-    return json({ error: "Invalid signature" }, 401);
+  if (!providedSig || expectedSig !== providedSig) return json({ error: "Invalid signature" }, 401);
 
   if (data.status !== "SUCCESS") return json({ received: true });
 
@@ -34,8 +37,11 @@ export async function onRequestPost({ request, env }) {
 
   if (!reference || amount <= 0) return json({ error: "Missing required fields" }, 400);
 
-  const intentRes = await sbFetch(supabaseUrl, serviceKey,
-    `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(reference)}&provider=eq.opay&limit=1`);
+  const intentRes = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(reference)}&provider=eq.opay&limit=1`,
+  );
   const intents = intentRes.ok ? await intentRes.json() : [];
   const intent = intents[0];
 
@@ -67,8 +73,7 @@ export async function onRequestPost({ request, env }) {
     return json({ error: "Failed to credit wallet" }, 500);
   }
 
-  await sbFetch(supabaseUrl, serviceKey,
-    `/rest/v1/payment_intents?id=eq.${intent.id}`, {
+  await sbFetch(supabaseUrl, serviceKey, `/rest/v1/payment_intents?id=eq.${intent.id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
     body: JSON.stringify({ status: "success", updated_at: new Date().toISOString() }),
@@ -80,16 +85,24 @@ export async function onRequestPost({ request, env }) {
 async function hmacSha512Hex(secret, payload) {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
-    "raw", enc.encode(secret),
+    "raw",
+    enc.encode(secret),
     { name: "HMAC", hash: "SHA-512" },
-    false, ["sign"]
+    false,
+    ["sign"],
   );
   const sigBuf = await crypto.subtle.sign("HMAC", key, enc.encode(payload));
-  return Array.from(new Uint8Array(sigBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return Array.from(new Uint8Array(sigBuf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 async function ensureWallet(supabaseUrl, serviceKey, userId) {
-  const res = await sbFetch(supabaseUrl, serviceKey, `/rest/v1/wallets?user_id=eq.${userId}&limit=1`);
+  const res = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/wallets?user_id=eq.${userId}&limit=1`,
+  );
   const rows = await res.json();
   if (rows.length > 0) return rows[0];
   const cr = await sbFetch(supabaseUrl, serviceKey, "/rest/v1/wallets", {

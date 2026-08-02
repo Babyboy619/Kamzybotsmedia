@@ -22,6 +22,7 @@ description: Core patterns for the KAMZYBOT'S MEDIA Logs TanStack Start + Supaba
 - Brand: `bg-brand-orange`, `hover:bg-brand-orange-hover`, `text-brand-navy`.
 
 ## Route → file map
+
 - `/dashboard` → `src/routes/dashboard.tsx`
 - `/wallet` → `src/routes/wallet.tsx`
 - `/admin` → `src/routes/admin.tsx`

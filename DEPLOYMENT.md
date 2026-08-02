@@ -6,17 +6,17 @@ This app is a **TanStack Start** project (React 19 + Vite 7) backed by **Lovable
 
 ## 1. Environment Variables
 
-| Variable | Where | Purpose |
-| --- | --- | --- |
-| `VITE_SUPABASE_URL` | client + server | Lovable Cloud URL (auto-provided) |
-| `VITE_SUPABASE_PUBLISHABLE_KEY` | client + server | Anon/publishable key (auto-provided) |
-| `SUPABASE_URL` | server only | Same as above for server functions |
-| `SUPABASE_PUBLISHABLE_KEY` | server only | Same |
-| `SUPABASE_SERVICE_ROLE_KEY` | server only | Admin key — used by webhook handlers & credential delivery |
-| `PAYSTACK_SECRET_KEY` | server only | Paystack webhook verification |
-| `VITE_PAYSTACK_PUBLIC_KEY` | client | Paystack popup init |
-| `NOWPAYMENTS_API_KEY` | server only | NOWPayments manual verification |
-| `LOVABLE_API_KEY` | server only | Lovable AI Gateway (already configured) |
+| Variable                        | Where           | Purpose                                                    |
+| ------------------------------- | --------------- | ---------------------------------------------------------- |
+| `VITE_SUPABASE_URL`             | client + server | Lovable Cloud URL (auto-provided)                          |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | client + server | Anon/publishable key (auto-provided)                       |
+| `SUPABASE_URL`                  | server only     | Same as above for server functions                         |
+| `SUPABASE_PUBLISHABLE_KEY`      | server only     | Same                                                       |
+| `SUPABASE_SERVICE_ROLE_KEY`     | server only     | Admin key — used by webhook handlers & credential delivery |
+| `PAYSTACK_SECRET_KEY`           | server only     | Paystack webhook verification                              |
+| `VITE_PAYSTACK_PUBLIC_KEY`      | client          | Paystack popup init                                        |
+| `NOWPAYMENTS_API_KEY`           | server only     | NOWPayments manual verification                            |
+| `LOVABLE_API_KEY`               | server only     | Lovable AI Gateway (already configured)                    |
 
 > Inside Lovable, these are managed under **Cloud → Secrets**. Do **not** commit them to git.
 
@@ -27,7 +27,7 @@ This app is a **TanStack Start** project (React 19 + Vite 7) backed by **Lovable
 The Supabase database is provisioned automatically by Lovable Cloud. Tables created by migrations in `supabase/migrations/`:
 
 - `profiles`, `user_roles`, `wallets`, `wallet_transactions`
-- `products`, `product_categories`, `product_credentials` *(login logs delivered to buyers)*
+- `products`, `product_categories`, `product_credentials` _(login logs delivered to buyers)_
 - `orders`, `order_items`, `payment_intents`
 - `site_settings`, `activity_logs`
 
@@ -79,5 +79,6 @@ Set build command `npm run build`, publish directory `.output/public`, then add 
 ## 5. OAuth
 
 Google OAuth is wired via the Lovable broker (`src/integrations/lovable`). After deploying to a custom domain, add the new origin to:
+
 - Lovable Cloud → Auth → Site URL + Redirect URLs
 - Google Cloud Console → OAuth client → Authorized redirect URIs

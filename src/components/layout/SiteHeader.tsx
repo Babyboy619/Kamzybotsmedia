@@ -1,7 +1,16 @@
-
 import { Link, NavLink } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { Search, User, UserPlus, LayoutGrid, Menu, LogOut, LayoutDashboard, Wallet, Tag } from "lucide-react";
+import {
+  Search,
+  User,
+  UserPlus,
+  LayoutGrid,
+  Menu,
+  LogOut,
+  LayoutDashboard,
+  Wallet,
+  Tag,
+} from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -117,7 +126,10 @@ export function SiteHeader() {
                     <User className="w-4 h-4" />
                     Login
                   </Link>
-                  <Button asChild className="bg-brand-orange hover:bg-brand-orange-hover text-white shadow-sm">
+                  <Button
+                    asChild
+                    className="bg-brand-orange hover:bg-brand-orange-hover text-white shadow-sm"
+                  >
                     <Link to="/auth?mode=signup" className="flex items-center gap-2">
                       <UserPlus className="w-4 h-4" />
                       <span className="hidden xs:inline">Register</span>
