@@ -29,8 +29,8 @@ export async function onRequestPost({ request, env }) {
       rawNeuraPaySecret: env?.NEURAPAY_SECRET_KEY ? String(env.NEURAPAY_SECRET_KEY).slice(0,8) : null,
     });
 
-    if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
-    if (!secretKey || !baseUrl) {
+    if (!testMode && (!supabaseUrl || !serviceKey)) return json({ error: "Server not configured" }, 503);
+    if (!testMode && (!secretKey || !baseUrl)) {
       return json({ error: "NeuraPay credentials are not configured. Add NEURAPAY_SECRET_KEY and NEURAPAY_BASE_URL." }, 500);
     }
 
