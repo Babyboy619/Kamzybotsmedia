@@ -2,36 +2,48 @@
 // Initializes a NeuraPay wallet deposit intent and forwards the request to NeuraPay.
 
 export async function onRequestPost({ request, env }) {
-  const supabaseUrl = readEnvValue(env, "VITE_SUPABASE_URL") || readEnvValue(env, "SUPABASE_URL") || "";
-  const serviceKey = readEnvValue(env, "SUPABASE_SERVICE_ROLE_KEY") || "";
-  const publicKey = readEnvValue(env, "NEURAPAY_PUBLIC_KEY") || "";
-  const secretKey = readEnvValue(env, "NEURAPAY_SECRET_KEY") || "";
-  const baseUrl = readEnvValue(env, "NEURAPAY_BASE_URL") || "https://api.neurapay.co";
-  const siteUrl = readEnvValue(env, "VITE_SITE_URL") || "https://sammystore.pages.dev";
+  try {
+    const supabaseUrl = readEnvValue(env, "VITE_SUPABASE_URL") || readEnvValue(env, "SUPABASE_URL") || "";
+    const serviceKey = readEnvValue(env, "SUPABASE_SERVICE_ROLE_KEY") || "";
+    const publicKey = readEnvValue(env, "NEURAPAY_PUBLIC_KEY") || "";
+    const secretKey = readEnvValue(env, "NEURAPAY_SECRET_KEY") || "";
+    const baseUrl = readEnvValue(env, "NEURAPAY_BASE_URL") || "https://api.neurapay.co";
+    const siteUrl = readEnvValue(env, "VITE_SITE_URL") || "https://sammystore.pages.dev";
 
-  console.log("[init-neurapay] env presence", {
-    supabase: !!supabaseUrl,
-    supabaseServiceKey: !!serviceKey,
-    neurapay_public: !!publicKey,
-    neurapay_secret: !!secretKey,
-    neurapay_base: !!baseUrl,
-  });
+    console.log("[init-neurapay] request received", {
+      method: request.method,
+      url: request.url,
+      authProvided: !!request.headers.get("Authorization"),
+      env: {
+        supabase: !!supabaseUrl,
+        supabaseServiceKey: !!serviceKey,
+        neurapay_public: !!publicKey,
+        neurapay_secret: !!secretKey,
+        neurapay_base: !!baseUrl,
+        siteUrl: !!siteUrl,
+      },
+    });
 
-  if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
-  if (!secretKey || !baseUrl) {
-    return json({ error: "NeuraPay credentials are not configured. Add NEURAPAY_SECRET_KEY and NEURAPAY_BASE_URL." }, 500);
-  }
+    if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
+    if (!secretKey || !baseUrl) {
+      return json({ error: "NeuraPay credentials are not configured. Add NEURAPAY_SECRET_KEY and NEURAPAY_BASE_URL." }, 500);
+    }
 
-  const auth = request.headers.get("Authorization") || "";
-  if (!auth.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
-  const user = await getUser(supabaseUrl, serviceKey, auth.slice(7));
-  if (!user) return json({ error: "Unauthorized" }, 401);
+    const auth = request.headers.get("Authorization") || "";
+    if (!auth.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
+    const user = await getUser(supabaseUrl, serviceKey, auth.slice(7));
+    if (!user) return json({ error: "Unauthorized" }, 401);
 
-  const body = await request.json().catch(() => ({}));
-  const { amount, userId, reference } = body;
-  if (!amount || !userId || !reference)
-    return json({ error: "amount, userId and reference are required" }, 400);
-  if (userId !== user.id) return json({ error: "Forbidden" }, 403);
+    const body = await request.json().catch(() => ({}));
+    const { amount, userId, reference } = body;
+    console.log("[init-neurapay] payload received", {
+      amount: Number(amount),
+      userId,
+      reference: reference?.slice(-16),
+    });
+    if (!amount || !userId || !reference)
+      return json({ error: "amount, userId and reference are required" }, 400);
+    if (userId !== user.id) return json({ error: "Forbidden" }, 403);
 
   const existingRes = await sbFetch(
     supabaseUrl,
@@ -63,6 +75,12 @@ export async function onRequestPost({ request, env }) {
   let initRes;
   let initBody;
   try {
+    console.log("[init-neurapay] sending NeuraPay request", {
+      url: `${baseUrl}/v1/transactions/init`,
+      method: "POST",
+      authHeader: secretKey ? "Bearer [REDACTED]" : "missing",
+      payload: initPayload,
+    });
     initRes = await fetch(`${baseUrl}/v1/transactions/init`, {
       method: "POST",
       headers: {
@@ -136,6 +154,13 @@ export async function onRequestPost({ request, env }) {
     instructions: "Transfer the amount to the virtual account below, then verify the payment.",
     publicKey,
   });
+  } catch (err) {
+    console.error("[init-neurapay] unhandled error", err);
+    return json(
+      { error: err instanceof Error ? err.message : String(err) },
+      500,
+    );
+  }
 }
 
 async function getUser(supabaseUrl, serviceKey, token) {

@@ -2,32 +2,39 @@
 // Verifies a NeuraPay deposit and credits the user's wallet in Supabase.
 
 export async function onRequestPost({ request, env }) {
-  const supabaseUrl = readEnvValue(env, "VITE_SUPABASE_URL") || readEnvValue(env, "SUPABASE_URL") || "";
-  const serviceKey = readEnvValue(env, "SUPABASE_SERVICE_ROLE_KEY") || "";
-  const secretKey = readEnvValue(env, "NEURAPAY_SECRET_KEY") || "";
-  const baseUrl = readEnvValue(env, "NEURAPAY_BASE_URL") || "https://api.neurapay.co";
+  try {
+    const supabaseUrl = readEnvValue(env, "VITE_SUPABASE_URL") || readEnvValue(env, "SUPABASE_URL") || "";
+    const serviceKey = readEnvValue(env, "SUPABASE_SERVICE_ROLE_KEY") || "";
+    const secretKey = readEnvValue(env, "NEURAPAY_SECRET_KEY") || "";
+    const baseUrl = readEnvValue(env, "NEURAPAY_BASE_URL") || "https://api.neurapay.co";
 
-  console.log("[verify-neurapay] env presence", {
-    supabase: !!supabaseUrl,
-    supabaseServiceKey: !!serviceKey,
-    neurapay_secret: !!secretKey,
-    neurapay_base: !!baseUrl,
-  });
+    console.log("[verify-neurapay] request received", {
+      method: request.method,
+      url: request.url,
+      authProvided: !!request.headers.get("Authorization"),
+      env: {
+        supabase: !!supabaseUrl,
+        supabaseServiceKey: !!serviceKey,
+        neurapay_secret: !!secretKey,
+        neurapay_base: !!baseUrl,
+      },
+    });
 
-  if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
-  if (!secretKey || !baseUrl) {
-    return json({ error: "NeuraPay credentials are not configured. Add NEURAPAY_SECRET_KEY and NEURAPAY_BASE_URL." }, 500);
-  }
+    if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
+    if (!secretKey || !baseUrl) {
+      return json({ error: "NeuraPay credentials are not configured. Add NEURAPAY_SECRET_KEY and NEURAPAY_BASE_URL." }, 500);
+    }
 
-  const auth = request.headers.get("Authorization") || "";
-  if (!auth.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
-  const user = await getUser(supabaseUrl, serviceKey, auth.slice(7));
-  if (!user) return json({ error: "Unauthorized" }, 401);
+    const auth = request.headers.get("Authorization") || "";
+    if (!auth.startsWith("Bearer ")) return json({ error: "Unauthorized" }, 401);
+    const user = await getUser(supabaseUrl, serviceKey, auth.slice(7));
+    if (!user) return json({ error: "Unauthorized" }, 401);
 
-  const body = await request.json().catch(() => ({}));
-  const { reference, userId } = body;
-  if (!reference || !userId) return json({ error: "reference and userId are required" }, 400);
-  if (userId !== user.id) return json({ error: "Forbidden" }, 403);
+    const body = await request.json().catch(() => ({}));
+    const { reference, userId } = body;
+    console.log("[verify-neurapay] payload received", { reference: reference?.slice(-16), userId });
+    if (!reference || !userId) return json({ error: "reference and userId are required" }, 400);
+    if (userId !== user.id) return json({ error: "Forbidden" }, 403);
 
   const intentRes = await sbFetch(
     supabaseUrl,
@@ -116,7 +123,13 @@ export async function onRequestPost({ request, env }) {
     },
   );
 
-  return json({ success: true, amount, alreadyCredited: false });
+  const response = json({ success: true, amount, alreadyCredited: false });
+  console.log("[verify-neurapay] completed successfully", { reference, amount });
+  return response;
+  } catch (err) {
+    console.error("[verify-neurapay] uncaught error", err);
+    return json({ error: `Internal server error: ${err instanceof Error ? err.message : String(err)}` }, 500);
+  }
 }
 
 async function getUser(supabaseUrl, serviceKey, token) {
@@ -158,7 +171,7 @@ function sbFetch(supabaseUrl, serviceKey, path, extra = {}) {
 function readEnvValue(env, key) {
   const value = env?.[key];
   if (value !== undefined && value !== null && value !== "") return value;
-  const fallback = process.env?.[key];
+  const fallback = typeof process !== "undefined" ? process.env?.[key] : undefined;
   return fallback !== undefined && fallback !== null ? fallback : "";
 }
 
