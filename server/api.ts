@@ -34,15 +34,18 @@ const upload = multer({
 
 // ─── Config ──────────────────────────────────────────────────────────
 // Prefer VITE_SUPABASE_URL (the active project) over the legacy SUPABASE_URL
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? process.env.SUPABASE_URL ?? "";
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-const NEURAPAY_PUBLIC_KEY =
-  process.env.NEURAPAY_PUBLIC_KEY ?? "np_live_pk_587c22e08e530066178082515b54c7e6";
-const NEURAPAY_SECRET_KEY =
-  process.env.NEURAPAY_SECRET_KEY ?? "np_live_sk_1fe9333ec9f180b72e451365cec13299";
-const NEURAPAY_BASE_URL = process.env.NEURAPAY_BASE_URL ?? "https://api.neurapay.co";
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? "";
-const ADMIN_API_TOKEN = process.env.ADMIN_API_TOKEN ?? "";
+function readEnv(key: string) {
+  const value = process.env[key];
+  return value !== undefined && value !== null && value !== "" ? value : "";
+}
+
+const SUPABASE_URL = readEnv("VITE_SUPABASE_URL") || readEnv("SUPABASE_URL");
+const SUPABASE_SERVICE_KEY = readEnv("SUPABASE_SERVICE_ROLE_KEY");
+const NEURAPAY_PUBLIC_KEY = readEnv("NEURAPAY_PUBLIC_KEY");
+const NEURAPAY_SECRET_KEY = readEnv("NEURAPAY_SECRET_KEY");
+const NEURAPAY_BASE_URL = readEnv("NEURAPAY_BASE_URL") || "https://api.neurapay.co";
+const ADMIN_EMAIL = readEnv("ADMIN_EMAIL");
+const ADMIN_API_TOKEN = readEnv("ADMIN_API_TOKEN");
 
 // ─── Supabase admin client ─────────────────────────────────────────────────
 let supabaseAdmin: SupabaseClient | null = null;
@@ -137,6 +140,41 @@ function err(res: express.Response, status: number, msg: string) {
   return res.status(status).json({ error: msg });
 }
 
+function isNeuraPaySuccess(payload: Record<string, unknown> | null | undefined) {
+  if (!payload) return false;
+  if (payload.success === true) return true;
+  if (payload.status === "success") return true;
+  if (payload.status === "paid") return true;
+  if ((payload.data as Record<string, unknown> | undefined)?.success === true) return true;
+  if ((payload.data as Record<string, unknown> | undefined)?.status === "success") return true;
+  return false;
+}
+
+function extractNeuraPayErrorMessage(payload: Record<string, unknown> | null | undefined, status: number) {
+  const message = extractNeuraPayValue(payload, ["message", "error", "detail", "errorMessage"]);
+  if (message) return String(message);
+  return `NeuraPay request failed with status ${status}`;
+}
+
+function extractNeuraPayValue(payload: Record<string, unknown> | null | undefined, keys: string[]) {
+  const visit = (node: unknown, path: string[]): unknown => {
+    if (!node || typeof node !== "object") return undefined;
+    for (const key of path) {
+      const value = (node as Record<string, unknown>)[key];
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+    for (const key of Object.keys(node as Record<string, unknown>)) {
+      const child = (node as Record<string, unknown>)[key];
+      if (child && typeof child === "object") {
+        const found = visit(child, path);
+        if (found !== undefined) return found;
+      }
+    }
+    return undefined;
+  };
+  return visit(payload, keys);
+}
+
 // ─── Routes ──────────────────────────────────────────────────────────
 
 // Image upload — no auth required (admin-only UI enforces access control)
@@ -198,10 +236,53 @@ app.post("/api/payment/init-neurapay", async (req, res) => {
     });
   }
 
+  if (!NEURAPAY_SECRET_KEY || !NEURAPAY_BASE_URL) {
+    return err(res, 500, "NeuraPay credentials are not configured. Add NEURAPAY_SECRET_KEY and NEURAPAY_BASE_URL.");
+  }
+
+  let initRes: Response | null = null;
+  let initBody = "";
+  try {
+    initRes = await fetch(`${NEURAPAY_BASE_URL}/v1/transactions/init`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${NEURAPAY_SECRET_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        amount: Number(amount),
+        reference,
+        currency: "NGN",
+        customerName: user.email?.split("@")[0] || "Customer",
+        customerEmail: user.email || "",
+        description: `Wallet funding via NeuraPay (${reference})`,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    initBody = await initRes.text();
+  } catch (e) {
+    console.error("[API] NeuraPay init request failed", e);
+    return err(res, 502, `NeuraPay initialization request failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  let initJson: Record<string, unknown> | null = null;
+  try {
+    initJson = initBody ? (JSON.parse(initBody) as Record<string, unknown>) : null;
+  } catch (e) {
+    console.error("[API] NeuraPay init returned invalid JSON", e, initBody);
+    return err(res, 502, `NeuraPay returned invalid JSON: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  if (!initRes?.ok || !isNeuraPaySuccess(initJson)) {
+    const errorMessage = extractNeuraPayErrorMessage(initJson, initRes?.status ?? 0);
+    return err(res, 502, errorMessage);
+  }
+
   const { error: upsertErr } = await supabaseAdmin!.from("payment_intents").upsert(
     {
       ...payload,
       user_id: userId,
+      raw: initJson,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -210,8 +291,8 @@ app.post("/api/payment/init-neurapay", async (req, res) => {
 
   if (upsertErr) return err(res, 500, upsertErr.message);
 
-  const accountNumber = `NP${reference.slice(-8).toUpperCase()}`;
-  const bankName = "NeuraPay Virtual Account";
+  const accountNumber = extractNeuraPayValue(initJson, ["accountNumber", "account_number", "virtualAccountNumber", "virtual_account_number", "accountNo", "account_no"]) || `NP${reference.slice(-8).toUpperCase()}`;
+  const bankName = extractNeuraPayValue(initJson, ["bankName", "bank_name", "bank", "accountBank"]) || "NeuraPay Virtual Account";
 
   return res.json({
     success: true,
@@ -249,7 +330,9 @@ app.post("/api/payment/verify-neurapay", async (req, res) => {
     });
   }
 
-  if (!NEURAPAY_SECRET_KEY) return err(res, 500, "NeuraPay is not configured — contact support");
+  if (!NEURAPAY_SECRET_KEY || !NEURAPAY_BASE_URL) {
+    return err(res, 500, "NeuraPay credentials are not configured. Add NEURAPAY_SECRET_KEY and NEURAPAY_BASE_URL.");
+  }
 
   const verifyPayload = {
     reference,
@@ -286,9 +369,9 @@ app.post("/api/payment/verify-neurapay", async (req, res) => {
     return err(res, 502, `NeuraPay returned invalid JSON: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
   }
 
-  const success = responseJson?.success === true || responseJson?.status === "success";
+  const success = isNeuraPaySuccess(responseJson);
   if (!verifyRes?.ok || !success) {
-    const errorMessage = (responseJson?.error as string) || (responseJson?.message as string) || `NeuraPay verification failed with status ${verifyRes?.status}`;
+    const errorMessage = extractNeuraPayErrorMessage(responseJson, verifyRes?.status ?? 0);
     console.error("[NeuraPay] verification failed", { errorMessage, responseJson });
     return err(res, 400, errorMessage);
   }
