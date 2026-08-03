@@ -15,6 +15,7 @@ export async function onRequestPost({ request, env }) {
       url: request.url,
       authProvided: !!request.headers.get("Authorization"),
       env: {
+        keys: env ? Object.keys(env).sort() : null,
         supabase: !!supabaseUrl,
         supabaseServiceKey: !!serviceKey,
         neurapay_public: !!publicKey,
@@ -22,6 +23,8 @@ export async function onRequestPost({ request, env }) {
         neurapay_base: !!baseUrl,
         siteUrl: !!siteUrl,
       },
+      rawServiceKey: env?.SUPABASE_SERVICE_ROLE_KEY ? String(env.SUPABASE_SERVICE_ROLE_KEY).slice(0,8) : null,
+      rawNeuraPaySecret: env?.NEURAPAY_SECRET_KEY ? String(env.NEURAPAY_SECRET_KEY).slice(0,8) : null,
     });
 
     if (!supabaseUrl || !serviceKey) return json({ error: "Server not configured" }, 503);
@@ -164,10 +167,18 @@ export async function onRequestPost({ request, env }) {
 }
 
 async function getUser(supabaseUrl, serviceKey, token) {
-  const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
-    headers: { Authorization: `Bearer ${token}`, apikey: serviceKey },
-  });
-  return res.ok ? res.json() : null;
+  try {
+    const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: serviceKey },
+    });
+    return res.ok ? res.json() : null;
+  } catch (err) {
+    console.error("[init-neurapay] getUser failed", {
+      error: err instanceof Error ? err.message : String(err),
+      supabaseUrl,
+    });
+    return null;
+  }
 }
 
 function sbFetch(supabaseUrl, serviceKey, path, extra = {}) {
@@ -185,7 +196,7 @@ function sbFetch(supabaseUrl, serviceKey, path, extra = {}) {
 function readEnvValue(env, key) {
   const value = env?.[key];
   if (value !== undefined && value !== null && value !== "") return value;
-  const fallback = process.env?.[key];
+  const fallback = typeof process !== "undefined" ? process.env?.[key] : undefined;
   return fallback !== undefined && fallback !== null ? fallback : "";
 }
 

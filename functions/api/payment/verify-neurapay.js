@@ -133,10 +133,18 @@ export async function onRequestPost({ request, env }) {
 }
 
 async function getUser(supabaseUrl, serviceKey, token) {
-  const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
-    headers: { Authorization: `Bearer ${token}`, apikey: serviceKey },
-  });
-  return res.ok ? res.json() : null;
+  try {
+    const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: serviceKey },
+    });
+    return res.ok ? res.json() : null;
+  } catch (err) {
+    console.error("[verify-neurapay] getUser failed", {
+      error: err instanceof Error ? err.message : String(err),
+      supabaseUrl,
+    });
+    return null;
+  }
 }
 
 async function ensureWallet(supabaseUrl, serviceKey, userId) {
