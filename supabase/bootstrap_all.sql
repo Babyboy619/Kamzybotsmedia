@@ -15,7 +15,7 @@ DO $$ BEGIN
 DO $$ BEGIN
   CREATE TYPE public.tx_status      AS ENUM ('pending', 'success', 'failed', 'reversed'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
-  CREATE TYPE public.payment_provider AS ENUM ('paystack', 'nowpayments', 'manual'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+  CREATE TYPE public.payment_provider AS ENUM ('neurapay', 'manual'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
 DO $$ BEGIN CREATE TYPE public.order_status   AS ENUM ('pending', 'completed', 'pending_credentials', 'failed', 'refunded'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 

@@ -6,7 +6,7 @@ export async function onRequestPost({ request, env }) {
     const supabaseUrl = readEnvValue(env, "VITE_SUPABASE_URL") || readEnvValue(env, "SUPABASE_URL") || "";
     const serviceKey = readEnvValue(env, "SUPABASE_SERVICE_ROLE_KEY") || "";
     const secretKey = readEnvValue(env, "NEURAPAY_SECRET_KEY") || "";
-    const baseUrl = readEnvValue(env, "NEURAPAY_BASE_URL") || "https://api.neurapay.co";
+    const baseUrl = readEnvValue(env, "NEURAPAY_BASE_URL") || "https://neurapay.com.ng/api/v1";
     const testMode = isNeuraPayTestMode(env);
 
     console.log("[verify-neurapay] request received", {
@@ -60,7 +60,7 @@ export async function onRequestPost({ request, env }) {
   if (intent?.status === "success")
     return json({ success: true, amount: Number(intent.amount), alreadyCredited: true });
 
-  const verifyUrl = `${baseUrl}/v1/transactions/verify`;
+  const verifyUrl = `${baseUrl}/transactions/verify`;
   const verifyPayload = { reference, amount: Number(intent?.amount ?? incomingAmount ?? 0) };
   console.log("[NeuraPay verify] request", { verifyUrl, verifyPayload });
 
