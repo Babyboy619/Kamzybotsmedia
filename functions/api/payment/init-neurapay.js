@@ -7,8 +7,8 @@ export async function onRequestPost({ request, env }) {
     const serviceKey = readEnvValue(env, "SUPABASE_SERVICE_ROLE_KEY") || "";
     const publicKey = readEnvValue(env, "NEURAPAY_PUBLIC_KEY") || "";
     const secretKey = readEnvValue(env, "NEURAPAY_SECRET_KEY") || "";
-    const baseUrl = readEnvValue(env, "NEURAPAY_BASE_URL") || "https://api.neurapay.co";
-    const siteUrl = readEnvValue(env, "VITE_SITE_URL") || "https://sammystore.pages.dev";
+    const baseUrl = readEnvValue(env, "NEURAPAY_BASE_URL") || "https://neurapay.com.ng/api/v1";
+    const siteUrl = readEnvValue(env, "VITE_SITE_URL") || "https://kamzybotsmedia.store";
     const testMode = isNeuraPayTestMode(env);
 
     console.log("[init-neurapay] request received", {
@@ -111,7 +111,7 @@ export async function onRequestPost({ request, env }) {
         authHeader: secretKey ? "Bearer [REDACTED]" : "missing",
         payload: initPayload,
       });
-      initRes = await fetch(`${baseUrl}/v1/transactions/init`, {
+      initRes = await fetch(`${baseUrl}/transactions/init`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${secretKey}`,

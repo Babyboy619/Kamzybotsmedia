@@ -13,9 +13,10 @@ This app is a **TanStack Start** project (React 19 + Vite 7) backed by **Lovable
 | `SUPABASE_URL`                  | server only     | Same as above for server functions                         |
 | `SUPABASE_PUBLISHABLE_KEY`      | server only     | Same                                                       |
 | `SUPABASE_SERVICE_ROLE_KEY`     | server only     | Admin key — used by webhook handlers & credential delivery |
-| `PAYSTACK_SECRET_KEY`           | server only     | Paystack webhook verification                              |
-| `VITE_PAYSTACK_PUBLIC_KEY`      | client          | Paystack popup init                                        |
-| `NOWPAYMENTS_API_KEY`           | server only     | NOWPayments manual verification                            |
+| `NEURAPAY_SECRET_KEY`           | server only     | NeuraPay secret key for transaction initialization & verification |
+| `NEURAPAY_BASE_URL`             | server only     | NeuraPay API base URL (default: https://neurapay.com.ng/api/v1) |
+| `NEURAPAY_PUBLIC_KEY`           | client + server | NeuraPay public key for wallet deposit initialization      |
+| `NEURAPAY_WEBHOOK_SECRET`       | server only     | NeuraPay webhook signature secret                          |
 | `LOVABLE_API_KEY`               | server only     | Lovable AI Gateway (already configured)                    |
 
 > Inside Lovable, these are managed under **Cloud → Secrets**. Do **not** commit them to git.
@@ -71,8 +72,7 @@ Set build command `npm run build`, publish directory `.output/public`, then add 
 
 ## 4. Payments
 
-- **Paystack:** initialize in the Wallet page; webhook URL `/api/public/paystack-webhook` verifies signature with `PAYSTACK_SECRET_KEY` and credits the wallet via `credit_wallet`.
-- **NOWPayments (manual):** user submits payment proof from the Wallet page; admin verifies & credits manually from the Admin → Users tab.
+- **NeuraPay:** initialize wallet funding via `/api/payment/init-neurapay`, verify via `/api/payment/verify-neurapay`, and configure webhook notifications at `/api/webhooks/neurapay`.
 
 ---
 

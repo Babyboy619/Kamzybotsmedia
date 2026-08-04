@@ -471,7 +471,7 @@ export type Database = {
     Enums: {
       app_role: "user" | "admin";
       order_status: "pending" | "completed" | "failed" | "refunded";
-      payment_provider: "paystack" | "nowpayments" | "manual";
+      payment_provider: "neurapay" | "manual";
       tx_status: "pending" | "success" | "failed" | "reversed";
       tx_type: "credit" | "debit";
     };
@@ -597,7 +597,7 @@ export const Constants = {
     Enums: {
       app_role: ["user", "admin"],
       order_status: ["pending", "completed", "pending_credentials", "failed", "refunded"],
-      payment_provider: ["paystack", "nowpayments", "manual"],
+      payment_provider: ["neurapay", "manual"],
       tx_status: ["pending", "success", "failed", "reversed"],
       tx_type: ["credit", "debit"],
     },

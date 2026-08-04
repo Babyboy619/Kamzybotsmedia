@@ -43,7 +43,7 @@ const SUPABASE_URL = readEnv("VITE_SUPABASE_URL") || readEnv("SUPABASE_URL");
 const SUPABASE_SERVICE_KEY = readEnv("SUPABASE_SERVICE_ROLE_KEY");
 const NEURAPAY_PUBLIC_KEY = readEnv("NEURAPAY_PUBLIC_KEY");
 const NEURAPAY_SECRET_KEY = readEnv("NEURAPAY_SECRET_KEY");
-const NEURAPAY_BASE_URL = readEnv("NEURAPAY_BASE_URL") || "https://api.neurapay.co";
+const NEURAPAY_BASE_URL = readEnv("NEURAPAY_BASE_URL") || "https://neurapay.com.ng/api/v1";
 const ADMIN_EMAIL = readEnv("ADMIN_EMAIL");
 const ADMIN_API_TOKEN = readEnv("ADMIN_API_TOKEN");
 
@@ -252,7 +252,7 @@ app.post("/api/payment/init-neurapay", async (req, res) => {
 
     const payload = {
       amount: Number(amount),
-      userId,
+      user_id: userId,
       reference,
       provider: "neurapay",
       status: "pending",
@@ -286,10 +286,12 @@ app.post("/api/payment/init-neurapay", async (req, res) => {
       return err(res, 500, "NeuraPay credentials are not configured. Add NEURAPAY_SECRET_KEY and NEURAPAY_BASE_URL.");
     }
 
+    const siteUrl = process.env.VITE_SITE_URL ?? "https://kamzybotsmedia.store";
+
     let initRes: Response | null = null;
     let initBody = "";
     try {
-      initRes = await fetch(`${NEURAPAY_BASE_URL}/v1/transactions/init`, {
+      initRes = await fetch(`${NEURAPAY_BASE_URL}/transactions/init`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${NEURAPAY_SECRET_KEY}`,
@@ -302,6 +304,7 @@ app.post("/api/payment/init-neurapay", async (req, res) => {
           customerName: user.email?.split("@")[0] || "Customer",
           customerEmail: user.email || "",
           description: `Wallet funding via NeuraPay (${reference})`,
+          callbackUrl: `${siteUrl}/wallet?ref=${reference}&userId=${userId}&provider=neurapay`,
         }),
         signal: AbortSignal.timeout(10000),
       });
@@ -327,7 +330,6 @@ app.post("/api/payment/init-neurapay", async (req, res) => {
     const { error: upsertErr } = await supabaseAdmin!.from("payment_intents").upsert(
       {
         ...payload,
-        user_id: userId,
         raw: initJson,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -402,7 +404,7 @@ app.post("/api/payment/verify-neurapay", async (req, res) => {
       reference,
       amount: Number((intent as Record<string, unknown>).amount ?? 0),
     };
-    const verifyUrl = `${NEURAPAY_BASE_URL}/v1/transactions/verify`;
+    const verifyUrl = `${NEURAPAY_BASE_URL}/transactions/verify`;
     let verifyRes: Response | null = null;
     let verifyBody: string | null = null;
 
@@ -792,148 +794,6 @@ app.post("/api/payment/admin-debit", async (req, res) => {
 });
 
 // Admin credit already exists as /api/payment/admin-credit
-
-// ─── Monnify payment routes ───────────────────────────────────────────────────
-const MONNIFY_API_KEY = process.env.MONNIFY_API_KEY ?? "";
-const MONNIFY_SECRET_KEY = process.env.MONNIFY_SECRET_KEY ?? "";
-const MONNIFY_BASE_URL = process.env.MONNIFY_BASE_URL ?? "https://sandbox.monnify.com";
-const MONNIFY_CONTRACT = process.env.MONNIFY_CONTRACT_CODE ?? "";
-
-async function getMonnifyToken(): Promise<string | null> {
-  if (!MONNIFY_API_KEY || !MONNIFY_SECRET_KEY) return null;
-  const creds = Buffer.from(`${MONNIFY_API_KEY}:${MONNIFY_SECRET_KEY}`).toString("base64");
-  try {
-    const r = await fetch(`${MONNIFY_BASE_URL}/api/v1/auth/login`, {
-      method: "POST",
-      headers: { Authorization: `Basic ${creds}` },
-    });
-    if (!r.ok) return null;
-    const j = (await r.json()) as { responseBody?: { accessToken?: string } };
-    return j.responseBody?.accessToken ?? null;
-  } catch {
-    return null;
-  }
-}
-
-app.post("/api/payment/init-monnify", async (req, res) => {
-  if (!requireSupabase(res)) return;
-  const user = await getAuthUser(req);
-  if (!user) return err(res, 401, "Unauthorized");
-  const { amount, userId, reference } = req.body as {
-    amount?: number;
-    userId?: string;
-    reference?: string;
-  };
-  if (!amount || !userId || !reference)
-    return err(res, 400, "amount, userId and reference are required");
-  if (userId !== user.id) return err(res, 403, "Forbidden");
-  if (!MONNIFY_API_KEY || !MONNIFY_SECRET_KEY || !MONNIFY_CONTRACT)
-    return err(res, 500, "Monnify is not configured — contact support");
-
-  const token = await getMonnifyToken();
-  if (!token) return err(res, 502, "Could not authenticate with Monnify");
-
-  const siteUrl =
-    process.env.VITE_SITE_URL ??
-    (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "");
-  const { data: intent } = await supabaseAdmin!
-    .from("payment_intents")
-    .select("id")
-    .eq("reference", reference)
-    .eq("user_id", userId)
-    .single();
-  if (!intent) return err(res, 400, "Invalid payment reference");
-
-  try {
-    const r = await fetch(`${MONNIFY_BASE_URL}/api/v1/merchant/transactions/init-transaction`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        amount,
-        customerName: user.email ?? "Customer",
-        customerEmail: user.email ?? "noreply@kamzybots.com",
-        paymentReference: reference,
-        paymentDescription: "KAMZYBOT'S MEDIA — Wallet Funding",
-        currencyCode: "NGN",
-        contractCode: MONNIFY_CONTRACT,
-        redirectUrl: `${siteUrl}/wallet?funded=monnify`,
-        paymentMethods: ["CARD", "ACCOUNT_TRANSFER", "USSD"],
-      }),
-    });
-    if (!r.ok) {
-      const t = await r.text();
-      return err(res, 502, `Monnify error: ${t}`);
-    }
-    const j = (await r.json()) as {
-      responseBody?: { checkoutUrl?: string; transactionReference?: string };
-    };
-    return res.json({
-      checkoutUrl: j.responseBody?.checkoutUrl,
-      transactionReference: j.responseBody?.transactionReference,
-    });
-  } catch {
-    return err(res, 502, "Could not reach Monnify — please try again later");
-  }
-});
-
-app.post("/api/payment/verify-monnify", async (req, res) => {
-  if (!requireSupabase(res)) return;
-  const user = await getAuthUser(req);
-  if (!user) return err(res, 401, "Unauthorized");
-  const { reference, userId } = req.body as { reference?: string; userId?: string };
-  if (!reference || !userId) return err(res, 400, "reference and userId are required");
-  if (userId !== user.id) return err(res, 403, "Forbidden");
-
-  const { data: intent } = await supabaseAdmin!
-    .from("payment_intents")
-    .select("*")
-    .eq("reference", reference)
-    .eq("user_id", userId)
-    .single();
-  if (!intent) return err(res, 400, "Invalid payment reference");
-  if ((intent as Record<string, unknown>).status === "success")
-    return res.json({
-      success: true,
-      amount: Number((intent as Record<string, unknown>).amount),
-      alreadyCredited: true,
-    });
-
-  if (!MONNIFY_API_KEY || !MONNIFY_SECRET_KEY) return err(res, 500, "Monnify is not configured");
-  const token = await getMonnifyToken();
-  if (!token) return err(res, 502, "Could not authenticate with Monnify");
-
-  try {
-    const encoded = encodeURIComponent(reference);
-    const r = await fetch(`${MONNIFY_BASE_URL}/api/v2/transactions/${encoded}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!r.ok) return err(res, 502, "Could not verify with Monnify");
-    const j = (await r.json()) as {
-      responseBody?: { paymentStatus?: string; amountPaid?: number };
-    };
-    if (j.responseBody?.paymentStatus !== "PAID") return err(res, 400, "Payment not confirmed");
-
-    const amount = j.responseBody?.amountPaid ?? Number((intent as Record<string, unknown>).amount);
-    const { error: creditErr } = await supabaseAdmin!.rpc(
-      "credit_wallet" as never,
-      {
-        _user_id: userId,
-        _amount: amount,
-        _provider: "monnify",
-        _reference: reference,
-        _description: "Wallet funded via Monnify",
-      } as never,
-    );
-    if (creditErr) return err(res, 500, (creditErr as { message: string }).message);
-    await supabaseAdmin!
-      .from("payment_intents")
-      .update({ status: "success", updated_at: new Date().toISOString() })
-      .eq("reference", reference);
-    return res.json({ success: true, amount, alreadyCredited: false });
-  } catch {
-    return err(res, 502, "Could not reach Monnify — please try again later");
-  }
-});
 
 // ─── Wallet ensure ────────────────────────────────────────────────────────────
 app.post("/api/wallet/ensure", async (req, res) => {
