@@ -29,12 +29,40 @@ export async function onRequestPost({ request, env }) {
     const cfg = neuraPayConfig(env);
 
     if (!supabaseUrl || !serviceKey) {
-      console.error("[init-neurapay] missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY");
-      return json({ error: "Payments are temporarily unavailable. Please try again later." }, 503);
+      console.error("[init-neurapay] stage=config missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY");
+      return json(
+        {
+          error:
+            "Payment initialization failed: server is missing Supabase configuration (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY).",
+          stage: "config",
+          diagnostics: { supabaseUrl: Boolean(supabaseUrl), serviceRoleKey: Boolean(serviceKey) },
+        },
+        503,
+      );
     }
     if (!cfg.secretKey) {
-      console.error("[init-neurapay] missing NEURAPAY_SECRET_KEY");
-      return json({ error: "Payments are temporarily unavailable. Please try again later." }, 503);
+      console.error("[init-neurapay] stage=config missing NEURAPAY_SECRET_KEY");
+      return json(
+        {
+          error: "Payment initialization failed: NEURAPAY_SECRET_KEY is not set on the server.",
+          stage: "config",
+          diagnostics: { neurapaySecretKey: false, baseUrl: cfg.baseUrl, initPath: cfg.initPath },
+        },
+        503,
+      );
+    }
+    if (!cfg.businessId) {
+      // NeuraPay rejects every init/verify call without the X-Business-Id header.
+      console.error("[init-neurapay] stage=config missing NEURAPAY_BUSINESS_ID");
+      return json(
+        {
+          error:
+            "Payment initialization failed: NEURAPAY_BUSINESS_ID is not set on the server. Copy the Business ID from your NeuraPay dashboard and add it as an environment variable.",
+          stage: "config",
+          diagnostics: { neurapayBusinessId: false, baseUrl: cfg.baseUrl, initPath: cfg.initPath },
+        },
+        503,
+      );
     }
 
     // ── Authenticate ────────────────────────────────────────────────────────
@@ -101,28 +129,52 @@ export async function onRequestPost({ request, env }) {
     );
 
     if (!upsert.ok) {
-      console.error(
-        "[init-neurapay] payment_intents upsert failed",
-        await upsert.text().catch(() => ""),
+      // Surface the DB failure (code/message/hint only — never keys or tokens).
+      const detailRaw = await upsert.text().catch(() => "");
+      let detail = null;
+      try {
+        const parsed = JSON.parse(detailRaw);
+        detail = {
+          code: parsed?.code ?? null,
+          message: parsed?.message ?? null,
+          details: parsed?.details ?? null,
+          hint: parsed?.hint ?? null,
+        };
+      } catch {
+        detail = { message: detailRaw.slice(0, 300) || null };
+      }
+      console.error("[init-neurapay] stage=supabase_insert failed", {
+        httpStatus: upsert.status,
+        reference,
+        amount,
+        ...detail,
+      });
+      return json(
+        {
+          error: `Payment initialization failed: Supabase payment_intents insert failed (HTTP ${upsert.status}${detail?.code ? `, code ${detail.code}` : ""})${detail?.message ? ` — ${detail.message}` : ""}`,
+          stage: "supabase_insert",
+          diagnostics: { httpStatus: upsert.status, ...detail, reference },
+        },
+        500,
       );
-      return json({ error: "Could not start this payment. Please try again." }, 500);
     }
 
-    // ── Call NeuraPay ───────────────────────────────────────────────────────
+    // ── Call NeuraPay: generate a dedicated virtual account ─────────────────
+    const customerName = (user.user_metadata?.full_name || user.email || "customer")
+      .toString()
+      .split("@")[0];
     const params = {
+      customer_name: customerName,
+      customer_email: user.email || "",
       amount,
       reference,
       currency: "NGN",
-      email: user.email || "",
-      customerEmail: user.email || "",
-      customerName: (user.email || "customer").split("@")[0],
       description: `Wallet funding (${reference})`,
-      callbackUrl: `${siteUrl}/wallet?ref=${encodeURIComponent(reference)}&provider=neurapay`,
-      redirectUrl: `${siteUrl}/wallet?ref=${encodeURIComponent(reference)}&provider=neurapay`,
+      callback_url: `${siteUrl}/wallet?ref=${encodeURIComponent(reference)}&provider=neurapay`,
     };
-    if (cfg.businessId) params.businessId = cfg.businessId;
 
-    const result = await neuraPayRequest(cfg, cfg.initPath, params);
+    const result = await neuraPayRequest(cfg, cfg.initPath, params, cfg.initMethod);
+
 
     if (!result.ok || !isNeuraPaySuccess(result.json)) {
       // Full diagnostics stay server-side; the user gets a safe message.
@@ -143,7 +195,26 @@ export async function onRequestPost({ request, env }) {
           body: JSON.stringify({ status: "failed", updated_at: new Date().toISOString() }),
         },
       );
-      return json({ error: neuraPayErrorMessage(result, "Could not start this payment") }, 400);
+      const upstream = neuraPayErrorMessage(result, "Could not start this payment");
+      return json(
+        {
+          error: result.networkError
+            ? `Payment initialization failed: could not reach NeuraPay (${result.networkError})`
+            : `Payment initialization failed: NeuraPay returned HTTP ${result.status} — ${upstream}`,
+          stage: "neurapay_init",
+          diagnostics: {
+            requestUrl: `${cfg.baseUrl}/${cfg.initPath}`,
+            method: cfg.initMethod,
+            httpStatus: result.status,
+            networkError: result.networkError,
+            reference,
+            amount,
+            currency: "NGN",
+            responseBody: result.raw?.slice(0, 500) ?? null,
+          },
+        },
+        400,
+      );
     }
 
     // Persist whatever NeuraPay gave us (its own transaction id + raw payload).

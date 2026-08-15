@@ -9,7 +9,7 @@ import {
   neuraPayConfig,
   neuraPayRequest,
   neuraPayErrorMessage,
-  isNeuraPaySuccess,
+
   isPaidStatus,
   extractValue,
   getUser,
@@ -54,18 +54,31 @@ export async function onRequestPost({ request, env }) {
       });
     }
 
-    const result = await neuraPayRequest(cfg, cfg.verifyPath, {
-      reference,
-      transactionId: intent.provider_reference || undefined,
-      ...(cfg.businessId ? { businessId: cfg.businessId } : {}),
-    });
+    // NeuraPay verify = GET /transactions/{reference}. It answers 404 until a
+    // transfer lands on the virtual account, which means "not paid yet".
+    const result = await neuraPayRequest(
+      cfg,
+      `${cfg.verifyPath}/${encodeURIComponent(reference)}`,
+      {},
+      "GET",
+    );
+
+    if (result.status === 404) {
+      return json(
+        {
+          success: false,
+          status: "pending",
+          error: "We haven't received this transfer yet. Try again once your bank confirms it.",
+        },
+        200,
+      );
+    }
 
     if (!result.ok) {
       console.error("[verify-neurapay] NeuraPay verify call failed", {
         status: result.status,
         networkError: result.networkError,
         path: cfg.verifyPath,
-        method: cfg.method,
         body: result.raw?.slice(0, 800),
       });
       // Upstream problem — the payment may still be valid, so stay "pending".
@@ -78,9 +91,11 @@ export async function onRequestPost({ request, env }) {
         200,
       );
     }
-
+    // The envelope always says status:"success" when the lookup worked, so the
+    // transaction state lives on data.status — read that first.
+    const payload = result.json?.data ?? result.json;
     const remoteStatus = String(
-      extractValue(result.json, [
+      extractValue(payload, [
         "status",
         "payment_status",
         "paymentStatus",
@@ -88,7 +103,8 @@ export async function onRequestPost({ request, env }) {
       ]) ?? "",
     ).toLowerCase();
 
-    if (!isNeuraPaySuccess(result.json)) {
+    if (!isPaidStatus(remoteStatus)) {
+
       const failed = [
         "failed",
         "cancelled",
@@ -112,7 +128,7 @@ export async function onRequestPost({ request, env }) {
 
     // ── Amount + currency checks before any credit ──────────────────────────
     const expected = Number(intent.amount);
-    const paidRaw = extractValue(result.json, [
+    const paidRaw = extractValue(payload, [
       "amountPaid",
       "amount_paid",
       "amount",
@@ -133,7 +149,7 @@ export async function onRequestPost({ request, env }) {
     }
 
     const currency = String(
-      extractValue(result.json, ["currency", "currency_code"]) ?? "NGN",
+      extractValue(payload, ["currency", "currency_code"]) ?? "NGN",
     ).toUpperCase();
     if (currency && currency !== "NGN") {
       console.error("[verify-neurapay] currency mismatch", { reference, currency });
