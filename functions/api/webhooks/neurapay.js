@@ -11,7 +11,6 @@ import {
   readEnv,
   neuraPayConfig,
   neuraPayRequest,
-  isNeuraPaySuccess,
   isPaidStatus,
   extractValue,
   verifyWebhookSignature,
@@ -87,16 +86,20 @@ export async function onRequestPost({ request, env }) {
     }
 
     // Never trust the webhook body alone — re-confirm with NeuraPay.
-    const result = await neuraPayRequest(cfg, cfg.verifyPath, {
-      reference,
-      transactionId: intent.provider_reference || undefined,
-      ...(cfg.businessId ? { businessId: cfg.businessId } : {}),
-    });
+    const result = await neuraPayRequest(
+      cfg,
+      `${cfg.verifyPath}/${encodeURIComponent(reference)}`,
+      {},
+      "GET",
+    );
+    const verified = result.json?.data ?? result.json;
+    const remoteStatus = extractValue(verified, ["status", "payment_status", "paymentStatus"]);
 
-    if (!result.ok || !isNeuraPaySuccess(result.json)) {
+    if (!result.ok || !isPaidStatus(remoteStatus)) {
       console.error("[neurapay webhook] re-verification failed", {
         reference,
         status: result.status,
+        remoteStatus,
         networkError: result.networkError,
         body: result.raw?.slice(0, 800),
       });
@@ -106,8 +109,9 @@ export async function onRequestPost({ request, env }) {
 
     const expected = Number(intent.amount);
     const paid = Number(
-      extractValue(result.json, ["amountPaid", "amount_paid", "amount", "value"]),
+      extractValue(verified, ["amountPaid", "amount_paid", "amount", "value"]),
     );
+
     if (Number.isFinite(paid) && paid > 0 && Math.abs(paid - expected) > 0.5) {
       console.error("[neurapay webhook] amount mismatch", { reference, expected, paid });
       return json({ received: true, credited: false, reason: "amount_mismatch" }, 200);
