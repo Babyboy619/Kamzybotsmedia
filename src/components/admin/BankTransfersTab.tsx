@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -20,7 +20,7 @@ export function BankTransfersTab() {
   const [filter, setFilter] = useState<"pending" | "approved" | "rejected" | "all">("pending");
   const [processing, setProcessing] = useState<string | null>(null);
 
-  const fetchTransfers = async () => {
+  const fetchTransfers = useCallback(async () => {
     setLoading(true);
     let q = supabase
       .from("bank_transfer_requests")
@@ -30,11 +30,11 @@ export function BankTransfersTab() {
     const { data } = await q;
     setTransfers((data as Transfer[]) ?? []);
     setLoading(false);
-  };
+  }, [filter]);
 
   useEffect(() => {
     fetchTransfers();
-  }, [filter]);
+  }, [fetchTransfers]);
 
   const approve = async (id: string) => {
     setProcessing(id);

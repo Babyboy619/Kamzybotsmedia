@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Loader2,
   Users,
@@ -1165,7 +1165,7 @@ function ProductsTab() {
     Record<string, { available: number; total: number }>
   >({});
 
-  const fetchCredCounts = async (productIds: string[]) => {
+  const fetchCredCounts = useCallback(async (productIds: string[]) => {
     if (!productIds.length) return;
     const { data } = await supabase
       .from("product_credentials")
@@ -1178,9 +1178,9 @@ function ProductsTab() {
       if (!row.order_id) counts[row.product_id].available += 1;
     });
     setCredCounts(counts);
-  };
+  }, []);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     const [p, c] = await Promise.all([
       supabase.from("products").select("*").order("created_at", { ascending: false }),
@@ -1191,11 +1191,11 @@ function ProductsTab() {
     setCategories((c.data as Category[]) ?? []);
     setLoading(false);
     fetchCredCounts(prods.map((x) => x.id));
-  };
+  }, [fetchCredCounts]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   const openCreate = () => {
     setEditing(null);
@@ -2337,7 +2337,7 @@ function CredentialsDialog({ product, onClose }: { product: Product; onClose: ()
   const [copied, setCopied] = useState<string | null>(null);
   const [tab, setTab] = useState<"available" | "delivered">("available");
 
-  const fetchCreds = async () => {
+  const fetchCreds = useCallback(async () => {
     setLoading(true);
     const { data } = await supabase
       .from("product_credentials")
@@ -2346,10 +2346,10 @@ function CredentialsDialog({ product, onClose }: { product: Product; onClose: ()
       .order("created_at");
     setCreds((data ?? []) as unknown as Credential[]);
     setLoading(false);
-  };
+  }, [product.id]);
   useEffect(() => {
     fetchCreds();
-  }, []);
+  }, [fetchCreds]);
 
   const available = creds.filter((c) => !c.order_id);
   const delivered = creds.filter((c) => c.order_id);

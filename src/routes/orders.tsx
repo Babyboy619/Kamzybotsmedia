@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Loader2,
   ShoppingBag,
@@ -87,12 +87,7 @@ export default function OrdersPage() {
     if (!loading && !user) navigate("/auth?redirect=/orders");
   }, [user, loading, navigate]);
 
-  useEffect(() => {
-    if (!user) return;
-    fetchOrders();
-  }, [user]);
-
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     if (!user) return;
     setDataLoading(true);
 
@@ -177,7 +172,12 @@ export default function OrdersPage() {
     setOrders(enriched);
     if (enriched.length > 0) setExpanded(new Set([enriched[0].id]));
     setDataLoading(false);
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchOrders();
+  }, [user, fetchOrders]);
 
   const toggleExpand = (id: string) => {
     setExpanded((prev) => {

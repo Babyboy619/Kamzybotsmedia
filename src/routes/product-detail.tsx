@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2, ArrowLeft, Minus, Plus, ShoppingCart, Heart } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
@@ -21,12 +21,7 @@ export default function ProductDetailPage() {
   const [quantity, setQuantity] = useState(1);
   const [purchasing, setPurchasing] = useState(false);
 
-  useEffect(() => {
-    if (!slug) return;
-    fetchProduct();
-  }, [slug]);
-
-  const fetchProduct = async () => {
+  const fetchProduct = useCallback(async () => {
     if (!slug) return;
     setLoading(true);
     try {
@@ -43,7 +38,12 @@ export default function ProductDetailPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [slug, navigate]);
+
+  useEffect(() => {
+    if (!slug) return;
+    fetchProduct();
+  }, [slug, fetchProduct]);
 
   const handleQuantityChange = (value: number) => {
     if (value > 0 && value <= (product?.stock || 0)) {

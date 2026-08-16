@@ -72,7 +72,7 @@ export async function initNeuraPayDeposit(data: {
   return callApi<NeuraPayInitResult>("/api/payment/init-neurapay", data);
 }
 
-export async function verifyNeuraPayDeposit(data: { reference: string; userId: string }) {
+export async function verifyNeuraPayDeposit(data: { reference: string; userId?: string }) {
   return callApi<NeuraPayVerifyResult>("/api/payment/verify-neurapay", data);
 }
 

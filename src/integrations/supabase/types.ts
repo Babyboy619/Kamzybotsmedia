@@ -128,6 +128,7 @@ export type Database = {
           currency: string;
           id: string;
           provider: Database["public"]["Enums"]["payment_provider"];
+          provider_reference: string | null;
           raw: Json | null;
           reference: string;
           status: Database["public"]["Enums"]["tx_status"];
@@ -140,6 +141,7 @@ export type Database = {
           currency?: string;
           id?: string;
           provider: Database["public"]["Enums"]["payment_provider"];
+          provider_reference?: string | null;
           raw?: Json | null;
           reference: string;
           status?: Database["public"]["Enums"]["tx_status"];
@@ -152,6 +154,7 @@ export type Database = {
           currency?: string;
           id?: string;
           provider?: Database["public"]["Enums"]["payment_provider"];
+          provider_reference?: string | null;
           raw?: Json | null;
           reference?: string;
           status?: Database["public"]["Enums"]["tx_status"];

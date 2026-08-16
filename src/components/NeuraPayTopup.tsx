@@ -17,6 +17,35 @@ import { initNeuraPayDeposit, verifyNeuraPayDeposit } from "@/lib/api/payment";
 
 const PRESETS = [1000, 2000, 5000, 10000, 20000, 50000];
 const MIN_AMOUNT = 100;
+const PENDING_KEY = "kamzybots_neurapay_pending_refs";
+
+function readPendingRefs(): string[] {
+  try {
+    const raw = window.localStorage.getItem(PENDING_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0,
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistPendingRef(reference: string) {
+  const refs = readPendingRefs();
+  if (!refs.includes(reference)) {
+    refs.push(reference);
+    window.localStorage.setItem(PENDING_KEY, JSON.stringify(refs));
+  }
+}
+
+function clearPendingRef(reference: string) {
+  const refs = readPendingRefs().filter((item) => item !== reference);
+  window.localStorage.setItem(PENDING_KEY, JSON.stringify(refs));
+}
 
 type PaymentStatus = "idle" | "processing" | "pending" | "successful" | "failed" | "cancelled";
 
@@ -97,8 +126,11 @@ export default function NeuraPayTopup({ userId, onCompleted }: Props) {
         return;
       }
 
+      const reference = result.reference;
+      persistPendingRef(reference);
+
       setPayment({
-        reference: result.reference,
+        reference,
         amount: result.amount ?? amountNumber,
         paymentUrl: result.paymentUrl ?? undefined,
         accountNumber: result.accountNumber ?? undefined,
@@ -126,6 +158,7 @@ export default function NeuraPayTopup({ userId, onCompleted }: Props) {
       const result = await verifyNeuraPayDeposit({ reference: payment.reference, userId });
 
       if (result.success) {
+        clearPendingRef(payment.reference);
         setStatus("successful");
         setMessage(null);
         toast.success(
