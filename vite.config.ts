@@ -5,6 +5,9 @@ import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
   plugins: [tsconfigPaths(), tailwindcss(), react()],
+  build: {
+    chunkSizeWarningLimit: 1500,
+  },
   optimizeDeps: {
     include: [
       "react",

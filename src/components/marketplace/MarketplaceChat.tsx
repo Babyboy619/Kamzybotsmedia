@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useAuth } from "@/lib/auth";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/integrations/supabase/client";
 
 type Message = { id: string; sender_id: string; message: string; created_at: string };
 
@@ -22,9 +23,7 @@ export default function MarketplaceChat({
     if (!productId) return;
     (async () => {
       try {
-        const session = await (
-          await import("@/integrations/supabase/client")
-        ).supabase.auth.getSession();
+        const session = await supabase.auth.getSession();
         const token = session?.data?.session?.access_token;
         const res = await fetch("/api/marketplace/conversations", {
           method: "POST",
@@ -48,9 +47,7 @@ export default function MarketplaceChat({
     let mounted = true;
     const fetchMsgs = async () => {
       try {
-        const session = await (
-          await import("@/integrations/supabase/client")
-        ).supabase.auth.getSession();
+        const session = await supabase.auth.getSession();
         const token = session?.data?.session?.access_token;
         const res = await fetch(`/api/marketplace/conversations/${convId}/messages`, {
           headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -74,9 +71,7 @@ export default function MarketplaceChat({
   const send = async () => {
     if (!convId || !text.trim()) return;
     try {
-      const session = await (
-        await import("@/integrations/supabase/client")
-      ).supabase.auth.getSession();
+      const session = await supabase.auth.getSession();
       const token = session?.data?.session?.access_token;
       const res = await fetch(`/api/marketplace/conversations/${convId}/messages`, {
         method: "POST",

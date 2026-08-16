@@ -108,9 +108,7 @@ export async function onRequestPost({ request, env }) {
     }
 
     const expected = Number(intent.amount);
-    const paid = Number(
-      extractValue(verified, ["amountPaid", "amount_paid", "amount", "value"]),
-    );
+    const paid = Number(extractValue(verified, ["amountPaid", "amount_paid", "amount", "value"]));
 
     if (Number.isFinite(paid) && paid > 0 && Math.abs(paid - expected) > 0.5) {
       console.error("[neurapay webhook] amount mismatch", { reference, expected, paid });

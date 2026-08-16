@@ -159,7 +159,6 @@ function err(res: express.Response, status: number, msg: string) {
   return res.status(status).json({ error: msg });
 }
 
-
 // ─── Routes ──────────────────────────────────────────────────────────
 
 // Image upload — no auth required (admin-only UI enforces access control)
@@ -204,11 +203,23 @@ app.get("/api/payment/neurapay-diagnostics", async (_req, res) => {
   };
   if (supabaseUrl && serviceKey) {
     try {
-      const r = await sbFetch(supabaseUrl, serviceKey, "/rest/v1/payment_intents?select=id&limit=1");
+      const r = await sbFetch(
+        supabaseUrl,
+        serviceKey,
+        "/rest/v1/payment_intents?select=id&limit=1",
+      );
       const body = await r.text().catch(() => "");
-      paymentIntents = { reachable: r.ok, httpStatus: r.status, message: r.ok ? null : body.slice(0, 300) };
+      paymentIntents = {
+        reachable: r.ok,
+        httpStatus: r.status,
+        message: r.ok ? null : body.slice(0, 300),
+      };
     } catch (e) {
-      paymentIntents = { reachable: false, httpStatus: 0, message: e instanceof Error ? e.message : String(e) };
+      paymentIntents = {
+        reachable: false,
+        httpStatus: 0,
+        message: e instanceof Error ? e.message : String(e),
+      };
     }
   }
   res.json({
@@ -232,16 +243,32 @@ app.post("/api/payment/init-neurapay", async (req, res) => {
   try {
     const { supabaseUrl, serviceKey, cfg } = npEnv();
     if (!supabaseUrl || !serviceKey)
-      return err(res, 503, "Payment initialization failed: server is missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY.");
+      return err(
+        res,
+        503,
+        "Payment initialization failed: server is missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY.",
+      );
     if (!cfg.secretKey)
-      return err(res, 503, "Payment initialization failed: NEURAPAY_SECRET_KEY is not set on the server.");
+      return err(
+        res,
+        503,
+        "Payment initialization failed: NEURAPAY_SECRET_KEY is not set on the server.",
+      );
     if (!cfg.businessId)
-      return err(res, 503, "Payment initialization failed: NEURAPAY_BUSINESS_ID is not set on the server.");
+      return err(
+        res,
+        503,
+        "Payment initialization failed: NEURAPAY_BUSINESS_ID is not set on the server.",
+      );
 
     const user = await getAuthUser(req);
     if (!user) return err(res, 401, "Unauthorized");
 
-    const { amount: rawAmount, userId: bodyUserId, reference: rawReference } = req.body as {
+    const {
+      amount: rawAmount,
+      userId: bodyUserId,
+      reference: rawReference,
+    } = req.body as {
       amount?: number;
       userId?: string;
       reference?: string;
@@ -249,31 +276,48 @@ app.post("/api/payment/init-neurapay", async (req, res) => {
     const amount = Number(rawAmount);
     const reference = String(rawReference ?? "").trim();
     if (!Number.isFinite(amount) || amount < MIN_TOPUP || amount > MAX_TOPUP)
-      return err(res, 400, `Enter an amount between ₦${MIN_TOPUP} and ₦${MAX_TOPUP.toLocaleString()}.`);
-    if (!/^[A-Za-z0-9._-]{8,64}$/.test(reference)) return err(res, 400, "Invalid payment reference");
+      return err(
+        res,
+        400,
+        `Enter an amount between ₦${MIN_TOPUP} and ₦${MAX_TOPUP.toLocaleString()}.`,
+      );
+    if (!/^[A-Za-z0-9._-]{8,64}$/.test(reference))
+      return err(res, 400, "Invalid payment reference");
     if (bodyUserId && bodyUserId !== user.id) return err(res, 403, "Forbidden");
     const userId = user.id;
 
     const existing = await getIntent(supabaseUrl, serviceKey, reference, userId);
     if (existing?.status === "success")
-      return res.json({ success: true, reference, amount: Number(existing.amount ?? amount), alreadyCredited: true });
+      return res.json({
+        success: true,
+        reference,
+        amount: Number(existing.amount ?? amount),
+        alreadyCredited: true,
+      });
 
     const nowIso = new Date().toISOString();
-    const upsert = await sbFetch(supabaseUrl, serviceKey, "/rest/v1/payment_intents?on_conflict=reference", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify({
-        user_id: userId,
-        provider: "neurapay",
-        reference,
-        amount,
-        currency: "NGN",
-        status: "pending",
-        description: "Wallet funding via NeuraPay",
-        created_at: nowIso,
-        updated_at: nowIso,
-      }),
-    });
+    const upsert = await sbFetch(
+      supabaseUrl,
+      serviceKey,
+      "/rest/v1/payment_intents?on_conflict=reference",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          provider: "neurapay",
+          reference,
+          amount,
+          currency: "NGN",
+          status: "pending",
+          created_at: nowIso,
+          updated_at: nowIso,
+        }),
+      },
+    );
 
     if (!upsert.ok) {
       const detail = await upsert.text().catch(() => "");
@@ -286,7 +330,9 @@ app.post("/api/payment/init-neurapay", async (req, res) => {
     }
 
     const customerName = String(
-      (user.user_metadata as Record<string, unknown> | undefined)?.full_name || user.email || "customer",
+      (user.user_metadata as Record<string, unknown> | undefined)?.full_name ||
+        user.email ||
+        "customer",
     ).split("@")[0];
     const siteUrl = process.env.VITE_SITE_URL ?? "https://kamzybotsmedia.store";
 
@@ -306,7 +352,12 @@ app.post("/api/payment/init-neurapay", async (req, res) => {
     );
 
     if (!result.ok || !isNeuraPaySuccess(result.json)) {
-      console.error("[API] NeuraPay init failed", result.status, result.networkError, result.raw?.slice(0, 500));
+      console.error(
+        "[API] NeuraPay init failed",
+        result.status,
+        result.networkError,
+        result.raw?.slice(0, 500),
+      );
       await sbFetch(
         supabaseUrl,
         serviceKey,
@@ -335,15 +386,20 @@ app.post("/api/payment/init-neurapay", async (req, res) => {
       "reference",
     ]);
 
-    await sbFetch(supabaseUrl, serviceKey, `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(reference)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
-      body: JSON.stringify({
-        raw: result.json,
-        provider_reference: providerReference ? String(providerReference) : null,
-        updated_at: new Date().toISOString(),
-      }),
-    }).catch(() => {});
+    await sbFetch(
+      supabaseUrl,
+      serviceKey,
+      `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(reference)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
+        body: JSON.stringify({
+          raw: result.json,
+          provider_reference: providerReference ? String(providerReference) : null,
+          updated_at: new Date().toISOString(),
+        }),
+      },
+    ).catch(() => {});
 
     const paymentUrl = extractValue(result.json, [
       "paymentUrl",
@@ -403,9 +459,19 @@ app.post("/api/payment/verify-neurapay", async (req, res) => {
     const intent = await getIntent(supabaseUrl, serviceKey, reference, user.id);
     if (!intent) return err(res, 404, "Invalid or expired payment reference");
     if (intent.status === "success")
-      return res.json({ success: true, status: "successful", amount: Number(intent.amount), alreadyCredited: true });
+      return res.json({
+        success: true,
+        status: "successful",
+        amount: Number(intent.amount),
+        alreadyCredited: true,
+      });
 
-    const result = await neuraPayRequest(cfg, `${cfg.verifyPath}/${encodeURIComponent(reference)}`, {}, "GET");
+    const result = await neuraPayRequest(
+      cfg,
+      `${cfg.verifyPath}/${encodeURIComponent(reference)}`,
+      {},
+      "GET",
+    );
 
     if (result.status === 404)
       return res.json({
@@ -415,7 +481,12 @@ app.post("/api/payment/verify-neurapay", async (req, res) => {
       });
 
     if (!result.ok) {
-      console.error("[API] NeuraPay verify failed", result.status, result.networkError, result.raw?.slice(0, 500));
+      console.error(
+        "[API] NeuraPay verify failed",
+        result.status,
+        result.networkError,
+        result.raw?.slice(0, 500),
+      );
       return res.json({
         success: false,
         status: "pending",
@@ -425,26 +496,44 @@ app.post("/api/payment/verify-neurapay", async (req, res) => {
 
     const payload = result.json?.data ?? result.json;
     const remoteStatus = String(
-      extractValue(payload, ["status", "payment_status", "paymentStatus", "transactionStatus"]) ?? "",
+      extractValue(payload, ["status", "payment_status", "paymentStatus", "transactionStatus"]) ??
+        "",
     ).toLowerCase();
 
     if (!isPaidStatus(remoteStatus)) {
-      const failed = ["failed", "cancelled", "canceled", "declined", "reversed", "expired"].includes(remoteStatus);
+      const failed = [
+        "failed",
+        "cancelled",
+        "canceled",
+        "declined",
+        "reversed",
+        "expired",
+      ].includes(remoteStatus);
       return res.json({
         success: false,
         status: failed ? remoteStatus : "pending",
-        error: failed ? "This payment was not completed." : "Payment is still pending. Try again in a moment.",
+        error: failed
+          ? "This payment was not completed."
+          : "Payment is still pending. Try again in a moment.",
       });
     }
 
     const expected = Number(intent.amount);
-    const paid = Number(extractValue(payload, ["amountPaid", "amount_paid", "amount", "settledAmount", "value"]));
+    const paid = Number(
+      extractValue(payload, ["amountPaid", "amount_paid", "amount", "settledAmount", "value"]),
+    );
     if (Number.isFinite(paid) && paid > 0 && Math.abs(paid - expected) > 0.5) {
       console.error("[API] verify-neurapay amount mismatch", { reference, expected, paid });
-      return res.json({ success: false, status: "failed", error: "Payment amount did not match. Contact support." });
+      return res.json({
+        success: false,
+        status: "failed",
+        error: "Payment amount did not match. Contact support.",
+      });
     }
 
-    const currency = String(extractValue(payload, ["currency", "currency_code"]) ?? "NGN").toUpperCase();
+    const currency = String(
+      extractValue(payload, ["currency", "currency_code"]) ?? "NGN",
+    ).toUpperCase();
     if (currency !== "NGN")
       return res.json({ success: false, status: "failed", error: "Unsupported payment currency." });
 
@@ -467,6 +556,120 @@ app.post("/api/payment/verify-neurapay", async (req, res) => {
   }
 });
 
+app.post("/api/payment/reconcile-neurapay", async (req, res) => {
+  try {
+    const { supabaseUrl, serviceKey, cfg } = npEnv();
+    if (!supabaseUrl || !serviceKey || !cfg.secretKey)
+      return err(res, 503, "Payments are temporarily unavailable. Please try again later.");
+
+    const user = await getAuthUser(req);
+    if (!user) return err(res, 401, "Unauthorized");
+
+    const { reference: rawReference } = req.body as { reference?: string };
+    const reference = String(rawReference ?? "").trim();
+
+    type ReconcileIntent = {
+      user_id?: string;
+      amount?: number | string;
+      reference?: string;
+      status?: string;
+    };
+
+    let intents: ReconcileIntent[] = [];
+    if (reference) {
+      const intent = await getIntent(supabaseUrl, serviceKey, reference, user.id);
+      intents = intent ? [intent as ReconcileIntent] : [];
+    } else {
+      const r = await sbFetch(
+        supabaseUrl,
+        serviceKey,
+        `/rest/v1/payment_intents?user_id=eq.${encodeURIComponent(user.id)}&provider=eq.neurapay&status=in.(pending,failed)&order=updated_at.asc&limit=50`,
+      );
+      if (r.ok) {
+        const rows = (await r.json().catch(() => [])) as ReconcileIntent[];
+        intents = rows;
+      }
+    }
+
+    let reconciled = 0;
+    for (const intent of intents) {
+      if (!intent || intent.status === "success") continue;
+      const ref = String(intent.reference ?? "");
+      if (!ref) continue;
+      const result = await neuraPayRequest(
+        cfg,
+        `${cfg.verifyPath}/${encodeURIComponent(ref)}`,
+        {},
+        "GET",
+      );
+      if (result.status === 404) continue;
+      if (!result.ok) continue;
+      const payload = result.json?.data ?? result.json;
+      const remoteStatus = String(
+        extractValue(payload, ["status", "payment_status", "paymentStatus", "transactionStatus"]) ??
+          "",
+      ).toLowerCase();
+      if (!isPaidStatus(remoteStatus)) {
+        const failed = [
+          "failed",
+          "cancelled",
+          "canceled",
+          "declined",
+          "reversed",
+          "expired",
+        ].includes(remoteStatus);
+        if (failed) {
+          await sbFetch(
+            supabaseUrl,
+            serviceKey,
+            `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(ref)}`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
+              body: JSON.stringify({ status: "failed", updated_at: new Date().toISOString() }),
+            },
+          );
+        }
+        continue;
+      }
+
+      const expected = Number(intent.amount ?? 0);
+      const paid = Number(
+        extractValue(payload, ["amountPaid", "amount_paid", "amount", "settledAmount", "value"]),
+      );
+      if (Number.isFinite(paid) && paid > 0 && Math.abs(paid - expected) > 0.5) {
+        await sbFetch(
+          supabaseUrl,
+          serviceKey,
+          `/rest/v1/payment_intents?reference=eq.${encodeURIComponent(ref)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", Prefer: "return=minimal" },
+            body: JSON.stringify({ status: "failed", updated_at: new Date().toISOString() }),
+          },
+        );
+        continue;
+      }
+
+      const outcome = await creditWalletOnce(supabaseUrl, serviceKey, {
+        userId: String(intent.user_id ?? user.id),
+        amount: expected,
+        reference: ref,
+      });
+      if (!outcome.error) reconciled += 1;
+    }
+
+    return res.json({
+      success: true,
+      reconciled,
+      scanned: intents.length,
+      reference: reference || null,
+    });
+  } catch (error) {
+    console.error("[API] reconcile-neurapay crashed", error);
+    return err(res, 500, "Something went wrong reconciling this payment. Please try again.");
+  }
+});
 
 app.post("/api/payment/admin-credit", async (req, res) => {
   const adminId = await requireAdmin(req, res);

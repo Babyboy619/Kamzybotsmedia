@@ -9,7 +9,6 @@ import {
   neuraPayConfig,
   neuraPayRequest,
   neuraPayErrorMessage,
-
   isPaidStatus,
   extractValue,
   getUser,
@@ -95,16 +94,11 @@ export async function onRequestPost({ request, env }) {
     // transaction state lives on data.status — read that first.
     const payload = result.json?.data ?? result.json;
     const remoteStatus = String(
-      extractValue(payload, [
-        "status",
-        "payment_status",
-        "paymentStatus",
-        "transactionStatus",
-      ]) ?? "",
+      extractValue(payload, ["status", "payment_status", "paymentStatus", "transactionStatus"]) ??
+        "",
     ).toLowerCase();
 
     if (!isPaidStatus(remoteStatus)) {
-
       const failed = [
         "failed",
         "cancelled",

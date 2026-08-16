@@ -40,6 +40,27 @@ async function getFreshToken(): Promise<string | null> {
 
 const RETRY_DELAY_MS = 2000;
 const MAX_ATTEMPTS = 3;
+const PENDING_KEY = "kamzybots_neurapay_pending_refs";
+
+function readPendingRefs(): string[] {
+  try {
+    const raw = window.localStorage.getItem(PENDING_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0,
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function clearPendingRef(reference: string) {
+  const next = readPendingRefs().filter((item) => item !== reference);
+  window.localStorage.setItem(PENDING_KEY, JSON.stringify(next));
+}
 
 /**
  * Ensures the user has a wallet row.
@@ -181,7 +202,7 @@ export default function WalletPage() {
     if (!loading && !user) navigate("/auth?redirect=/wallet");
   }, [user, loading, navigate]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (!user) return;
     setDataLoading(true);
     setWalletError(null);
@@ -213,18 +234,22 @@ export default function WalletPage() {
     }
 
     setDataLoading(false);
-  };
-
-  useEffect(() => {
-    if (user) fetchData();
   }, [user]);
 
   useEffect(() => {
-    const ref = searchParams.get("ref");
-    const userId = searchParams.get("userId");
-    if (!ref || !userId || !user) return;
+    if (user) fetchData();
+  }, [user, fetchData]);
 
-    const verifyPayment = async () => {
+  useEffect(() => {
+    if (!user) return;
+
+    const refFromUrl =
+      searchParams.get("reference") ||
+      searchParams.get("trxref") ||
+      searchParams.get("payment_reference") ||
+      searchParams.get("ref");
+
+    const verifyPayment = async (reference: string) => {
       const tid = toast.loading("Verifying your payment…");
       const token = await getFreshToken();
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -234,7 +259,7 @@ export default function WalletPage() {
         const res = await fetch(`/api/payment/verify-neurapay`, {
           method: "POST",
           headers,
-          body: JSON.stringify({ reference: ref, userId }),
+          body: JSON.stringify({ reference }),
         });
         const payload = await res.json().catch(() => ({}));
         toast.dismiss(tid);
@@ -244,21 +269,59 @@ export default function WalletPage() {
         }
         if (payload.alreadyCredited) {
           toast.info("Payment already credited to your wallet.");
-        } else {
+        } else if (payload.success) {
           toast.success(
             `₦${Number(payload.amount ?? 0).toLocaleString("en-NG")} added to your wallet!`,
           );
+        } else if (payload.status === "pending") {
+          toast.info(payload.error ?? "Payment is still pending.");
+        } else {
+          toast.error(payload.error ?? "Payment was not completed.");
         }
-        fetchData();
+        clearPendingRef(reference);
+        if (refFromUrl) {
+          navigate("/wallet", { replace: true });
+        }
+        await fetchData();
       } catch (err) {
         toast.dismiss(tid);
         toast.error(err instanceof Error ? err.message : "Verification failed — contact support");
       }
     };
 
-    void verifyPayment();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, searchParams]);
+    const reconcilePending = async () => {
+      const refs = readPendingRefs();
+      if (refs.length === 0) return;
+      const token = await getFreshToken();
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      for (const reference of refs) {
+        try {
+          const res = await fetch(`/api/payment/reconcile-neurapay`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ reference }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (res.ok && payload.success && (payload.reconciled ?? 0) > 0) {
+            clearPendingRef(reference);
+            toast.success("Pending payment has been confirmed and credited.");
+          }
+        } catch {
+          // Ignore reconcile errors here; the server remains the source of truth.
+        }
+      }
+      await fetchData();
+    };
+
+    if (refFromUrl) {
+      void verifyPayment(refFromUrl);
+      return;
+    }
+
+    void reconcilePending();
+  }, [user, searchParams, navigate, fetchData]);
 
   useEffect(() => {
     const funded = searchParams.get("funded");
@@ -293,7 +356,7 @@ export default function WalletPage() {
     return () => {
       if (ch) supabase.removeChannel(ch).catch(() => {});
     };
-  }, [user]);
+  }, [user, fetchData]);
 
   if (loading || !user)
     return (

@@ -29,7 +29,9 @@ export async function onRequestPost({ request, env }) {
     const cfg = neuraPayConfig(env);
 
     if (!supabaseUrl || !serviceKey) {
-      console.error("[init-neurapay] stage=config missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY");
+      console.error(
+        "[init-neurapay] stage=config missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY",
+      );
       return json(
         {
           error:
@@ -121,7 +123,6 @@ export async function onRequestPost({ request, env }) {
           amount,
           currency: "NGN",
           status: "pending",
-          description: "Wallet funding via NeuraPay",
           created_at: nowIso,
           updated_at: nowIso,
         }),
@@ -174,7 +175,6 @@ export async function onRequestPost({ request, env }) {
     };
 
     const result = await neuraPayRequest(cfg, cfg.initPath, params, cfg.initMethod);
-
 
     if (!result.ok || !isNeuraPaySuccess(result.json)) {
       // Full diagnostics stay server-side; the user gets a safe message.

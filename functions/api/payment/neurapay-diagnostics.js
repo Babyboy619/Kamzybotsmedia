@@ -27,7 +27,11 @@ export async function onRequestGet({ env }) {
   let paymentIntents = { reachable: false, httpStatus: 0, message: null };
   if (supabaseUrl && serviceKey) {
     try {
-      const res = await sbFetch(supabaseUrl, serviceKey, "/rest/v1/payment_intents?select=id&limit=1");
+      const res = await sbFetch(
+        supabaseUrl,
+        serviceKey,
+        "/rest/v1/payment_intents?select=id&limit=1",
+      );
       const body = await res.text().catch(() => "");
       paymentIntents = {
         reachable: res.ok,

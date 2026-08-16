@@ -12,7 +12,6 @@
 // Paths/methods stay env-overridable so they can be corrected from the
 // Cloudflare dashboard without a code change.
 
-
 export const DEFAULT_BASE_URL = "https://neurapay.com.ng/api/v1";
 export const NEURAPAY_TIMEOUT_MS = 15000;
 
@@ -84,7 +83,6 @@ export async function neuraPayRequest(cfg, path, params, methodOverride) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(params ?? {});
   }
-
 
   try {
     const res = await fetch(url.toString(), init);
