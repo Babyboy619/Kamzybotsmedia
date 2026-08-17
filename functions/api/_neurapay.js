@@ -12,6 +12,7 @@
 // Paths/methods stay env-overridable so they can be corrected from the
 // Cloudflare dashboard without a code change.
 
+
 export const DEFAULT_BASE_URL = "https://neurapay.com.ng/api/v1";
 export const NEURAPAY_TIMEOUT_MS = 15000;
 
@@ -83,6 +84,7 @@ export async function neuraPayRequest(cfg, path, params, methodOverride) {
     headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(params ?? {});
   }
+
 
   try {
     const res = await fetch(url.toString(), init);
@@ -259,7 +261,132 @@ export async function creditWalletOnce(supabaseUrl, serviceKey, { userId, amount
   return { credited: true, alreadyCredited: false, error: null };
 }
 
+/**
+ * Server-to-server confirmation of ONE intent, followed by an idempotent
+ * credit. Shared by the verify endpoint, the reconciliation endpoint and the
+ * webhook so all three paths behave identically.
+ * Returns { success, status, amount, alreadyCredited, error }.
+ */
+export async function verifyAndCreditIntent(cfg, supabaseUrl, serviceKey, intent) {
+  const reference = intent.reference;
+  const expected = Number(intent.amount);
+
+  if (intent.status === "success") {
+    console.log("[neurapay] verify: already credited", { reference });
+    return { success: true, status: "successful", amount: expected, alreadyCredited: true };
+  }
+
+  const result = await neuraPayRequest(
+    cfg,
+    `${cfg.verifyPath}/${encodeURIComponent(reference)}`,
+    {},
+    "GET",
+  );
+  console.log("[neurapay] verify: upstream lookup", {
+    reference,
+    httpStatus: result.status,
+    networkError: result.networkError,
+  });
+
+  if (result.status === 404) {
+    return {
+      success: false,
+      status: "pending",
+      error: "We haven't received this transfer yet. Try again once your bank confirms it.",
+    };
+  }
+
+  if (!result.ok) {
+    console.error("[neurapay] verify: upstream call failed", {
+      reference,
+      status: result.status,
+      body: result.raw?.slice(0, 500),
+    });
+    return {
+      success: false,
+      status: "pending",
+      error: neuraPayErrorMessage(result, "Could not confirm this payment yet"),
+    };
+  }
+
+  const payload = result.json?.data ?? result.json;
+  const remoteStatus = String(
+    extractValue(payload, ["status", "payment_status", "paymentStatus", "transactionStatus"]) ?? "",
+  ).toLowerCase();
+
+  if (!isPaidStatus(remoteStatus)) {
+    const failed = ["failed", "cancelled", "canceled", "declined", "reversed", "expired"].includes(
+      remoteStatus,
+    );
+    console.log("[neurapay] verify: not paid yet", { reference, remoteStatus });
+    return {
+      success: false,
+      status: failed ? remoteStatus : "pending",
+      error: failed
+        ? "This payment was not completed."
+        : "Payment is still pending. Try again in a moment.",
+    };
+  }
+
+  const paid = Number(
+    extractValue(payload, ["amountPaid", "amount_paid", "amount", "settledAmount", "value"]),
+  );
+  if (Number.isFinite(paid) && paid > 0 && Math.abs(paid - expected) > 0.5) {
+    console.error("[neurapay] verify: amount mismatch", { reference, expected, paid });
+    return {
+      success: false,
+      status: "failed",
+      error: "Payment amount did not match. Contact support.",
+    };
+  }
+
+  const currency = String(extractValue(payload, ["currency", "currency_code"]) ?? "NGN")
+    .toUpperCase();
+  if (currency && currency !== "NGN") {
+    console.error("[neurapay] verify: currency mismatch", { reference, currency });
+    return { success: false, status: "failed", error: "Unsupported payment currency." };
+  }
+
+  const outcome = await creditWalletOnce(supabaseUrl, serviceKey, {
+    userId: intent.user_id,
+    amount: expected,
+    reference,
+  });
+  console.log("[neurapay] verify: credit result", {
+    reference,
+    credited: outcome.credited,
+    alreadyCredited: outcome.alreadyCredited,
+    error: outcome.error,
+  });
+
+  if (outcome.error) return { success: false, status: "pending", error: outcome.error };
+
+  return {
+    success: true,
+    status: "successful",
+    amount: expected,
+    alreadyCredited: outcome.alreadyCredited,
+  };
+}
+
+/**
+ * Pending NeuraPay intents for a user, newest first. Used by the
+ * reconciliation sweep so a payment still lands when the user never returns
+ * to the browser tab that started it.
+ */
+export async function listPendingIntents(supabaseUrl, serviceKey, userId, hours = 48, limit = 20) {
+  const since = new Date(Date.now() - hours * 3600 * 1000).toISOString();
+  const res = await sbFetch(
+    supabaseUrl,
+    serviceKey,
+    `/rest/v1/payment_intents?user_id=eq.${encodeURIComponent(userId)}&provider=eq.neurapay&status=eq.pending&created_at=gte.${encodeURIComponent(since)}&order=created_at.desc&limit=${limit}`,
+  );
+  const rows = res.ok ? await res.json().catch(() => []) : [];
+  return Array.isArray(rows) ? rows : [];
+}
+
 export async function verifyWebhookSignature(rawBody, signatureHeader, secret) {
+
   const normalized = String(signatureHeader).trim().toLowerCase();
   const provided = normalized.startsWith("sha256=") ? normalized.slice(7) : normalized;
   try {
