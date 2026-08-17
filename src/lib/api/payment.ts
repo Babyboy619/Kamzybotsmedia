@@ -72,8 +72,21 @@ export async function initNeuraPayDeposit(data: {
   return callApi<NeuraPayInitResult>("/api/payment/init-neurapay", data);
 }
 
-export async function verifyNeuraPayDeposit(data: { reference: string; userId?: string }) {
+export async function verifyNeuraPayDeposit(data: { reference: string; userId: string }) {
   return callApi<NeuraPayVerifyResult>("/api/payment/verify-neurapay", data);
+}
+
+export type NeuraPayReconcileResult = {
+  success: boolean;
+  pending: number;
+  creditedCount: number;
+  creditedAmount: number;
+  results: Array<{ reference: string; status: string }>;
+};
+
+/** Confirms every pending NeuraPay intent server-side and credits the paid ones. */
+export async function reconcileNeuraPayDeposits() {
+  return callApi<NeuraPayReconcileResult>("/api/payment/reconcile-neurapay", {});
 }
 
 export async function adminCreditWalletFn(data: {
