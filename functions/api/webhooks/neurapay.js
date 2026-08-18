@@ -2,9 +2,12 @@
 // Production URL: https://kamzybotsmedia.store/api/webhooks/neurapay
 //
 // Validates the NeuraPay webhook signature (HMAC-SHA256 over the raw body
-// using NEURAPAY_WEBHOOK_SECRET) when one is configured, then ALWAYS
-// re-confirms the transaction with NeuraPay server-to-server before crediting
-// the wallet exactly once. The webhook body alone is never trusted.
+// using NEURAPAY_WEBHOOK_SECRET) when one is configured, then re-confirms the
+// transaction with NeuraPay server-to-server before crediting the wallet
+// exactly once. When the signature is valid but NeuraPay does not expose the
+// settled transfer through its transaction lookup, the signed body itself is
+// used as the confirmation source — otherwise a genuinely paid transfer would
+// never reach the wallet.
 
 import {
   json,
@@ -13,7 +16,7 @@ import {
   neuraPayConfig,
   extractValue,
   verifyWebhookSignature,
-  getIntent,
+  findIntent,
   verifyAndCreditIntent,
 } from "../_neurapay.js";
 
@@ -39,6 +42,7 @@ export async function onRequestPost({ request, env }) {
       request.headers.get("signature") ||
       "";
 
+    let signatureVerified = false;
     if (cfg.webhookSecret) {
       if (!signature) {
         console.error("[neurapay webhook] missing signature header");
@@ -48,6 +52,7 @@ export async function onRequestPost({ request, env }) {
         console.error("[neurapay webhook] invalid signature");
         return json({ error: "Invalid signature" }, 401);
       }
+      signatureVerified = true;
       console.log("[neurapay webhook] signature verified");
     } else {
       // No signing secret configured yet. The notification is treated purely as
@@ -65,41 +70,88 @@ export async function onRequestPost({ request, env }) {
       return json({ error: "Invalid JSON" }, 400);
     }
 
+    const body = payload?.data ?? payload;
+
     const reference = String(
       extractValue(payload, [
         "reference",
         "payment_reference",
         "paymentReference",
         "merchantReference",
+        "merchant_reference",
       ]) ?? "",
     ).trim();
-    if (!reference) return json({ error: "Missing reference" }, 400);
-    console.log("[neurapay webhook] received", { reference });
+    const providerReference = String(
+      extractValue(payload, [
+        "transaction_reference",
+        "transactionReference",
+        "transaction_id",
+        "transactionId",
+      ]) ?? "",
+    ).trim();
+    const accountNumber = String(
+      extractValue(payload, [
+        "account_number",
+        "accountNumber",
+        "virtual_account_number",
+        "virtualAccountNumber",
+      ]) ?? "",
+    ).trim();
 
-    const intent = await getIntent(supabaseUrl, serviceKey, reference);
+    console.log("[neurapay webhook] received", {
+      reference,
+      providerReference,
+      hasAccountNumber: Boolean(accountNumber),
+      event: payload?.event ?? payload?.type ?? null,
+      signatureVerified,
+    });
+
+    if (!reference && !providerReference && !accountNumber)
+      return json({ error: "Missing reference" }, 400);
+
+    const intent = await findIntent(supabaseUrl, serviceKey, {
+      reference,
+      providerReference,
+      accountNumber,
+    });
     if (!intent) {
-      console.error("[neurapay webhook] unknown reference", reference);
+      console.error("[neurapay webhook] no matching payment intent", {
+        reference,
+        providerReference,
+      });
       // 200 so NeuraPay does not retry forever on a foreign reference.
       return json({ received: true, credited: false, reason: "unknown_reference" });
     }
     if (intent.status === "success") {
-      console.log("[neurapay webhook] already credited", { reference });
+      console.log("[neurapay webhook] already credited", { reference: intent.reference });
       return json({ received: true, credited: false, alreadyCredited: true });
     }
 
-    // Never trust the webhook body — re-confirm, check amount + currency,
-    // then credit idempotently.
-    const outcome = await verifyAndCreditIntent(cfg, supabaseUrl, serviceKey, intent);
+    // The webhook body alone is only trusted when its HMAC signature checked
+    // out AND it reports a settled payment; otherwise NeuraPay must confirm it.
+    const outcome = await verifyAndCreditIntent(cfg, supabaseUrl, serviceKey, intent, {
+      providerReference,
+      trustedPayload: signatureVerified ? body : null,
+    });
 
     if (!outcome.success) {
       // Ask NeuraPay to retry later while the payment is still unconfirmed.
       const retryable = outcome.status === "pending";
-      console.warn("[neurapay webhook] not credited", { reference, status: outcome.status });
+      console.warn("[neurapay webhook] not credited", {
+        reference: intent.reference,
+        status: outcome.status,
+      });
       return json(
         { received: true, credited: false, reason: outcome.status },
         retryable ? 503 : 200,
       );
     }
+
+    console.log("[neurapay webhook] credited", {
+      reference: intent.reference,
+      amount: outcome.amount,
+      alreadyCredited: Boolean(outcome.alreadyCredited),
+    });
 
     return json({
       received: true,
@@ -114,4 +166,3 @@ export async function onRequestPost({ request, env }) {
     return json({ received: false, error: "Internal error" }, 500);
   }
 }
-
